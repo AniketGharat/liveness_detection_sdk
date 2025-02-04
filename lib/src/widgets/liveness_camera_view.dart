@@ -86,26 +86,36 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       appBar: AppBar(
         title: Text('Liveness Detection'),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isCameraReady)
-              Stack(
-                children: [
-                  CameraPreview(_cameraController!),
-                  CustomPaint(
-                    painter:
-                        FacePainter(_faces, _livenessDetector.currentState),
-                    child: Container(),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isCameraReady)
+                  Stack(
+                    children: [
+                      CameraPreview(_cameraController!),
+                      CustomPaint(
+                        painter:
+                            FacePainter(_faces, _livenessDetector.currentState),
+                        child: Container(),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            Text(
-              _detectionMessage,
-              style: TextStyle(fontSize: 20, color: Colors.red),
+                SizedBox(height: 20),
+                Text(
+                  _detectionMessage,
+                  style: TextStyle(fontSize: 20, color: Colors.red),
+                ),
+                SizedBox(height: 20),
+                Text(
+                  "Look around to verify liveness.",
+                  style: TextStyle(fontSize: 16),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
