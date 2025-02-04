@@ -6,38 +6,27 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:path_provider/path_provider.dart';
+
 import '../models/liveness_config.dart';
 import '../models/liveness_result.dart';
 import '../models/liveness_state.dart';
 
 class LivenessDetector {
   final LivenessConfig config;
-  StreamController<LivenessState>? _stateController;
-  StreamController<LivenessResult>? _resultController;
+  final Function(List<Face> faces)
+      onFaceDetected; // Callback function for face detection
   FaceDetector? _faceDetector;
-
-  Stream<LivenessState> get livenessState =>
-      _stateController?.stream ?? Stream.empty();
-  Stream<LivenessResult> get detectionResult =>
-      _resultController?.stream ?? Stream.empty();
-
-  LivenessState _currentState = LivenessState.initial;
-  int _straightCounter = 0;
-  int _leftCounter = 0;
-  int _rightCounter = 0;
-  int _straightAgainCounter = 0;
-  DateTime _stateStartTime = DateTime.now();
   bool _isProcessing = false;
-  bool _isDisposed = false;
-  CameraImage? _lastProcessedImage;
+  LivenessState _currentState = LivenessState.initial;
 
-  LivenessDetector({this.config = const LivenessConfig()}) {
-    _initializeControllers();
+  LivenessState get currentState => _currentState;
+
+  LivenessDetector(
+      {this.config = const LivenessConfig(), required this.onFaceDetected}) {
+    _initializeFaceDetector();
   }
 
-  void _initializeControllers() {
-    _stateController = StreamController<LivenessState>.broadcast();
-    _resultController = StreamController<LivenessResult>.broadcast();
+  void _initializeFaceDetector() {
     _faceDetector = FaceDetector(
       options: FaceDetectorOptions(
         enableLandmarks: true,
@@ -51,23 +40,18 @@ class LivenessDetector {
 
   Future<void> processImage(
       CameraImage image, InputImageRotation rotation) async {
-    if (_isProcessing || _isDisposed) return;
+    if (_isProcessing) return;
     _isProcessing = true;
-    _lastProcessedImage = image;
 
     try {
       final inputImage = await _convertCameraImageToInputImage(image, rotation);
-      if (_isDisposed) return;
-
       final faces = await _faceDetector?.processImage(inputImage);
-      if (_isDisposed || faces == null) return;
 
-      _handleFaceDetectionResult(faces);
+      if (faces != null) {
+        onFaceDetected(faces); // Send the faces to the callback function
+      }
     } catch (e) {
       print('Error processing image: $e');
-      if (!_isDisposed) {
-        _emitError('Processing error: ${e.toString()}');
-      }
     } finally {
       _isProcessing = false;
     }
@@ -114,123 +98,11 @@ class LivenessDetector {
     }
   }
 
-  void _handleFaceDetectionResult(List<Face> faces) {
-    if (_isDisposed) return;
-
-    if (faces.isEmpty) {
-      _emitError('No face detected');
-      return;
-    }
-
-    if (faces.length > 1) {
-      _emitError('Multiple faces detected');
-      return;
-    }
-
-    final face = faces.first;
-    _processFace(face);
+  void updateLivenessState(LivenessState state) {
+    _currentState = state;
   }
 
-  void _processFace(Face face) {
-    if (_isDisposed) return;
-
-    final eulerY = face.headEulerAngleY ?? 0;
-
-    switch (_currentState) {
-      case LivenessState.initial:
-        if (_isLookingStraight(eulerY)) {
-          _straightCounter++;
-          if (_straightCounter >= config.requiredFrames) {
-            _updateState(LivenessState.lookingStraight);
-          }
-        } else {
-          _straightCounter = 0;
-        }
-        break;
-      case LivenessState.lookingStraight:
-        if (_hasCompletedState() && _isLookingLeft(eulerY)) {
-          _leftCounter++;
-          if (_leftCounter >= config.requiredFrames) {
-            _updateState(LivenessState.lookingLeft);
-          }
-        } else {
-          _leftCounter = 0;
-        }
-        break;
-      case LivenessState.lookingLeft:
-        if (_hasCompletedState() && _isLookingRight(eulerY)) {
-          _rightCounter++;
-          if (_rightCounter >= config.requiredFrames) {
-            _updateState(LivenessState.lookingRight);
-          }
-        } else {
-          _rightCounter = 0;
-        }
-        break;
-      case LivenessState.lookingRight:
-        if (_hasCompletedState() && _isLookingStraight(eulerY)) {
-          _straightAgainCounter++;
-          if (_straightAgainCounter >= config.requiredFrames) {
-            _updateState(LivenessState.complete);
-            _emitSuccessResult();
-          }
-        } else {
-          _straightAgainCounter = 0;
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  Future<void> _emitSuccessResult() async {
-    if (!_isDisposed && _lastProcessedImage != null) {
-      final imagePath = await _captureImage(_lastProcessedImage!);
-      _resultController?.add(LivenessResult(
-        isSuccess: true,
-        state: LivenessState.complete,
-        imagePath: imagePath,
-      ));
-    }
-  }
-
-  void _emitError(String message) {
-    if (!_isDisposed) {
-      _updateState(LivenessState.error);
-      _resultController?.add(LivenessResult(
-        isSuccess: false,
-        errorMessage: message,
-        state: LivenessState.error,
-      ));
-    }
-  }
-
-  bool _isLookingStraight(double eulerY) =>
-      eulerY.abs() <= config.straightThreshold;
-
-  bool _isLookingLeft(double eulerY) => eulerY > config.turnThreshold;
-
-  bool _isLookingRight(double eulerY) => eulerY < -config.turnThreshold;
-
-  bool _hasCompletedState() =>
-      DateTime.now().difference(_stateStartTime).inMilliseconds >=
-      config.stateDuration;
-
-  void _updateState(LivenessState newState) {
-    if (!_isDisposed) {
-      _currentState = newState;
-      _stateStartTime = DateTime.now();
-      _stateController?.add(newState);
-    }
-  }
-
-  Future<void> dispose() async {
-    _isDisposed = true;
+  void dispose() async {
     await _faceDetector?.close();
-    await _stateController?.close();
-    await _resultController?.close();
-    _faceDetector = null;
-    _stateController = null;
-    _resultController = null;
   }
 }
