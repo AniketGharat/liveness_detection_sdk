@@ -35,15 +35,15 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
 
   Future<void> _initializeCamera() async {
     _cameras = await availableCameras();
-    if (_cameras.isNotEmpty) {
-      // Find the front camera (index may vary based on your device)
-      final frontCamera = _cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.front,
-        orElse: () => _cameras
-            .first, // Fall back to first camera if no front camera found
-      );
-      _initializeCameraController(frontCamera);
-    }
+
+    // Explicitly selecting the front camera
+    CameraDescription frontCamera = _cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.front,
+      orElse: () => _cameras.first, // Fallback if no front camera found
+    );
+
+    // Initialize the camera controller with front camera
+    _initializeCameraController(frontCamera);
   }
 
   Future<void> _initializeCameraController(CameraDescription camera) async {
@@ -54,6 +54,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       _isCameraReady = true;
     });
 
+    // Start streaming images from the camera
     _cameraController?.startImageStream((CameraImage image) {
       _livenessDetector.processImage(image, InputImageRotation.rotation0deg);
     });
@@ -69,14 +70,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       } else {
         _detectionMessage = "Face detected!";
       }
-    });
-  }
-
-  void _switchCamera() {
-    setState(() {
-      _currentCameraIndex =
-          (_currentCameraIndex + 1) % _cameras.length; // Switch between cameras
-      _initializeCameraController(_cameras[_currentCameraIndex]);
     });
   }
 
@@ -111,10 +104,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
             Text(
               _detectionMessage,
               style: TextStyle(fontSize: 20, color: Colors.red),
-            ),
-            ElevatedButton(
-              onPressed: _switchCamera,
-              child: Text('Switch Camera'),
             ),
           ],
         ),
