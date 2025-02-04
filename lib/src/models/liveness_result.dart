@@ -14,12 +14,4 @@ class LivenessResult {
     required this.state,
     this.metadata,
   });
-
-  Map<String, dynamic> toJson() => {
-        'isSuccess': isSuccess,
-        'imagePath': imagePath,
-        'errorMessage': errorMessage,
-        'state': state.toString(),
-        'metadata': metadata,
-      };
 }

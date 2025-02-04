@@ -4,7 +4,6 @@ enum LivenessState {
   lookingLeft,
   lookingRight,
   lookingStraightAgain,
-  blinkEyes,
   complete,
-  error
+  error,
 }
