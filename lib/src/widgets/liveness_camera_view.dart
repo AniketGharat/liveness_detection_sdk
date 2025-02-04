@@ -1,184 +1,214 @@
+import 'dart:ui';
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import '../../liveness_sdk.dart';
-import '../models/liveness_result.dart';
-import '../utils/liveness_detector.dart';
+import 'package:google_ml_kit/google_ml_kit.dart';
+import 'package:vibration/vibration.dart';
+import 'package:permission_handler/permission_handler.dart';
 
-class LivenessCameraView extends StatefulWidget {
-  final Function(LivenessResult result) onResult;
-
-  const LivenessCameraView({required this.onResult, Key? key})
-      : super(key: key);
-
+class LivenessCameraScreen extends StatefulWidget {
   @override
-  _LivenessCameraViewState createState() => _LivenessCameraViewState();
+  _LivenessCameraScreenState createState() => _LivenessCameraScreenState();
 }
 
-class _LivenessCameraViewState extends State<LivenessCameraView> {
-  late LivenessDetector _livenessDetector;
-  CameraController? _cameraController;
-  bool _isCameraReady = false;
-  String _detectionMessage = "";
+class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
+  CameraController? _controller;
+  bool _isDetecting = false;
+  late FaceDetector _faceDetector;
+  String _instruction = "Position your face in the frame";
+  late List<CameraDescription> _cameras;
+  late CameraDescription _camera;
   List<Face> _faces = [];
-  int _currentCameraIndex = 0;
-  List<CameraDescription> _cameras = [];
 
   @override
   void initState() {
     super.initState();
-    _initializeCamera();
-    _livenessDetector = LivenessDetector(
-      onFaceDetected: _handleFaceDetectionResult,
+    _initCamera();
+    _faceDetector = GoogleMlKit.vision.faceDetector(
+      FaceDetectorOptions(
+        enableLandmarks: true,
+        enableContours: true,
+        enableClassification: true,
+        minFaceSize: 0.25,
+      ),
     );
   }
 
-  Future<void> _initializeCamera() async {
+  Future<void> _initCamera() async {
     _cameras = await availableCameras();
+    _camera = _cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front);
 
-    // Explicitly selecting the front camera
-    CameraDescription frontCamera = _cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.front,
-      orElse: () => _cameras.first, // Fallback if no front camera found
-    );
+    await _checkPermissions();
 
-    // Initialize the camera controller with front camera
-    _initializeCameraController(frontCamera);
+    _controller = CameraController(_camera, ResolutionPreset.high);
+    await _controller?.initialize();
+
+    // Start image stream after initialization
+    await _controller?.startImageStream((image) => _onImageAvailable(image));
+
+    if (mounted) setState(() {});
   }
 
-  Future<void> _initializeCameraController(CameraDescription camera) async {
-    _cameraController = CameraController(camera, ResolutionPreset.high);
-    await _cameraController?.initialize();
-    if (!mounted) return;
-    setState(() {
-      _isCameraReady = true;
-    });
-
-    // Start streaming images from the camera
-    _cameraController?.startImageStream((CameraImage image) {
-      _livenessDetector.processImage(image, InputImageRotation.rotation0deg);
-    });
+  Future<void> _checkPermissions() async {
+    var status = await Permission.camera.request();
+    if (status != PermissionStatus.granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Camera permission is required")));
+      return;
+    }
   }
 
-  void _handleFaceDetectionResult(List<Face> faces) {
-    setState(() {
-      _faces = faces;
-      if (faces.isEmpty) {
-        _detectionMessage = "No face detected";
-      } else if (faces.length > 1) {
-        _detectionMessage = "Multiple faces detected";
-      } else {
-        _detectionMessage = "Face detected!";
+  Future<void> _onImageAvailable(CameraImage image) async {
+    if (_isDetecting) return;
+    _isDetecting = true;
+
+    try {
+      // Convert CameraImage to InputImage
+      final WriteBuffer allBytes = WriteBuffer();
+      for (Plane plane in image.planes) {
+        allBytes.putUint8List(plane.bytes);
       }
-    });
+      final bytes = allBytes.done().buffer.asUint8List();
+
+      final imageSize = Size(image.width.toDouble(), image.height.toDouble());
+      final imageRotation = InputImageRotation.rotation0deg;
+      final inputImageFormat = InputImageFormat.bgra8888;
+
+      final inputImageData = InputImageMetadata(
+        size: imageSize,
+        rotation: imageRotation,
+        format: inputImageFormat,
+        bytesPerRow: image.planes[0].bytesPerRow,
+      );
+
+      final inputImage = InputImage.fromBytes(
+        bytes: bytes,
+        metadata: inputImageData,
+      );
+
+      final faces = await _faceDetector.processImage(inputImage);
+
+      if (faces.isNotEmpty && mounted) {
+        setState(() {
+          _faces = faces;
+          _updateFaceTracking(faces.first);
+        });
+      }
+    } catch (e) {
+      print('Error processing image: $e');
+    } finally {
+      _isDetecting = false;
+    }
+  }
+
+  void _updateFaceTracking(Face face) {
+    final eulerY = face.headEulerAngleY;
+
+    if (eulerY != null && eulerY > 20) {
+      _instruction = "Looking Left! Slowly move to the right";
+      _vibrate();
+    } else if (eulerY != null && eulerY < -20) {
+      _instruction = "Looking Right! Slowly move to the left";
+      _vibrate();
+    } else {
+      _instruction = "Looking straight. Keep it up!";
+    }
+  }
+
+  void _vibrate() async {
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(duration: 100);
+    }
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
-    _livenessDetector.dispose();
+    _controller?.dispose();
+    _faceDetector.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Liveness Detection'),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_isCameraReady)
-                  Stack(
-                    children: [
-                      CameraPreview(_cameraController!),
-                      CustomPaint(
-                        painter:
-                            FacePainter(_faces, _livenessDetector.currentState),
-                        child: Container(),
-                      ),
-                    ],
-                  ),
-                SizedBox(height: 20),
-                Text(
-                  _detectionMessage,
-                  style: TextStyle(fontSize: 20, color: Colors.red),
-                ),
-                SizedBox(height: 20),
-                Text(
-                  "Look around to verify liveness.",
-                  style: TextStyle(fontSize: 16),
-                ),
-              ],
+      appBar: AppBar(title: Text("Liveness Check")),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          CameraPreview(_controller!),
+          CustomPaint(
+            painter: FaceTrackerPainter(_faces),
+          ),
+          Positioned(
+            bottom: 50,
+            left: 50,
+            right: 50,
+            child: Text(
+              _instruction,
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.white,
+                backgroundColor: Colors.black.withOpacity(0.6),
+              ),
+              textAlign: TextAlign.center,
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class FacePainter extends CustomPainter {
+class FaceTrackerPainter extends CustomPainter {
   final List<Face> faces;
-  final LivenessState currentState;
 
-  FacePainter(this.faces, this.currentState);
+  FaceTrackerPainter(this.faces);
 
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
-      ..color = Colors.green
+      ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4.0;
+      ..strokeWidth = 3.0;
 
-    // Mapping the LivenessState to the circle progress (1/4th per step)
-    double progress = 0.0;
-    switch (currentState) {
-      case LivenessState.initial:
-        progress = 0.0;
-        break;
-      case LivenessState.lookingStraight:
-        progress = 0.25;
-        break;
-      case LivenessState.lookingLeft:
-        progress = 0.5;
-        break;
-      case LivenessState.lookingRight:
-        progress = 0.75;
-        break;
-      case LivenessState.complete:
-        progress = 1.0;
-        break;
-      default:
-        break;
-    }
-
-    // Draw the face circle with the current progress
     for (Face face in faces) {
-      final rect = face.boundingBox;
-      double radius = rect.width / 2;
-      final startAngle = -90.0; // Start from top
-      final sweepAngle = 360 * progress;
+      canvas.drawRect(face.boundingBox, paint);
 
-      paint.color = Colors.green.withOpacity(0.8); // Green color for the circle
+      // Draw landmarks if available
+      face.landmarks.forEach((type, landmark) {
+        if (landmark != null && landmark.position != null) {
+          canvas.drawCircle(
+            Offset(landmark.position!.x.toDouble(),
+                landmark.position!.y.toDouble()),
+            5.0,
+            paint,
+          );
+        }
+      });
 
-      // Draw a partial circle to indicate progress
-      canvas.drawArc(
-        Rect.fromCircle(center: rect.center, radius: radius),
-        startAngle * 3.14159 / 180, // Convert to radians
-        sweepAngle * 3.14159 / 180, // Convert to radians
-        false,
-        paint,
-      );
+      // Draw contours if available
+      face.contours.forEach((contourType, contour) {
+        if (contour != null) {
+          final points = contour.points;
+          for (int i = 0; i < points.length - 1; i++) {
+            canvas.drawLine(
+              Offset(points[i].x.toDouble(), points[i].y.toDouble()),
+              Offset(points[i + 1].x.toDouble(), points[i + 1].y.toDouble()),
+              paint,
+            );
+          }
+        }
+      });
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return true;
-  }
+  bool shouldRepaint(FaceTrackerPainter oldDelegate) => true;
 }
