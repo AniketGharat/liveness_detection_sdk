@@ -1,3 +1,5 @@
+// liveness_camera_view.dart
+import 'dart:io';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -5,13 +7,32 @@ import 'package:flutter/material.dart';
 import 'package:google_ml_kit/google_ml_kit.dart';
 import 'package:vibration/vibration.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
 
-class LivenessCameraScreen extends StatefulWidget {
-  @override
-  _LivenessCameraScreenState createState() => _LivenessCameraScreenState();
+// Define the LivenessResult class
+class LivenessResult {
+  final bool isSuccess;
+  final String? imagePath;
+  final String? errorMessage;
+
+  LivenessResult({
+    required this.isSuccess,
+    this.imagePath,
+    this.errorMessage,
+  });
 }
 
-class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
+class LivenessCameraView extends StatefulWidget {
+  final Function(LivenessResult) onResult;
+
+  const LivenessCameraView({Key? key, required this.onResult})
+      : super(key: key);
+
+  @override
+  _LivenessCameraViewState createState() => _LivenessCameraViewState();
+}
+
+class _LivenessCameraViewState extends State<LivenessCameraView> {
   CameraController? _controller;
   bool _isDetecting = false;
   late FaceDetector _faceDetector;
@@ -19,6 +40,9 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
   late List<CameraDescription> _cameras;
   late CameraDescription _camera;
   List<Face> _faces = [];
+  bool _isFaceAligned = false;
+  int _alignedFrameCount = 0;
+  static const int _requiredAlignedFrames = 10;
 
   @override
   void initState() {
@@ -44,7 +68,6 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
     _controller = CameraController(_camera, ResolutionPreset.high);
     await _controller?.initialize();
 
-    // Start image stream after initialization
     await _controller?.startImageStream((image) => _onImageAvailable(image));
 
     if (mounted) setState(() {});
@@ -53,9 +76,11 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
   Future<void> _checkPermissions() async {
     var status = await Permission.camera.request();
     if (status != PermissionStatus.granted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Camera permission is required")));
-      return;
+      widget.onResult(LivenessResult(
+        isSuccess: false,
+        errorMessage: "Camera permission is required",
+      ));
+      Navigator.pop(context);
     }
   }
 
@@ -64,7 +89,6 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
     _isDetecting = true;
 
     try {
-      // Convert CameraImage to InputImage
       final WriteBuffer allBytes = WriteBuffer();
       for (Plane plane in image.planes) {
         allBytes.putUint8List(plane.bytes);
@@ -72,13 +96,10 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
       final bytes = allBytes.done().buffer.asUint8List();
 
       final imageSize = Size(image.width.toDouble(), image.height.toDouble());
-      final imageRotation = InputImageRotation.rotation0deg;
-      final inputImageFormat = InputImageFormat.bgra8888;
-
       final inputImageData = InputImageMetadata(
         size: imageSize,
-        rotation: imageRotation,
-        format: inputImageFormat,
+        rotation: InputImageRotation.rotation0deg,
+        format: InputImageFormat.bgra8888,
         bytesPerRow: image.planes[0].bytesPerRow,
       );
 
@@ -94,6 +115,12 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
           _faces = faces;
           _updateFaceTracking(faces.first);
         });
+      } else {
+        setState(() {
+          _isFaceAligned = false;
+          _alignedFrameCount = 0;
+          _instruction = "Position your face in the frame";
+        });
       }
     } catch (e) {
       print('Error processing image: $e');
@@ -104,21 +131,66 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
 
   void _updateFaceTracking(Face face) {
     final eulerY = face.headEulerAngleY;
+    final eulerZ = face.headEulerAngleZ;
 
-    if (eulerY != null && eulerY > 20) {
-      _instruction = "Looking Left! Slowly move to the right";
-      _vibrate();
-    } else if (eulerY != null && eulerY < -20) {
-      _instruction = "Looking Right! Slowly move to the left";
-      _vibrate();
-    } else {
-      _instruction = "Looking straight. Keep it up!";
-    }
+    bool isAligned = (eulerY != null && eulerY.abs() < 10) &&
+        (eulerZ != null && eulerZ.abs() < 10);
+
+    setState(() {
+      _isFaceAligned = isAligned;
+
+      if (isAligned) {
+        _alignedFrameCount++;
+        _instruction =
+            "Hold still... ${((_requiredAlignedFrames - _alignedFrameCount) / 30 * 100).round()}%";
+
+        if (_alignedFrameCount >= _requiredAlignedFrames) {
+          _captureImage();
+        }
+      } else {
+        _alignedFrameCount = 0;
+        if (eulerY != null && eulerY > 10) {
+          _instruction = "Turn your head left slightly";
+        } else if (eulerY != null && eulerY < -10) {
+          _instruction = "Turn your head right slightly";
+        } else {
+          _instruction = "Center your face";
+        }
+      }
+    });
   }
 
-  void _vibrate() async {
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 100);
+  Future<void> _captureImage() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    try {
+      // Stop the image stream
+      await _controller?.stopImageStream();
+
+      // Capture the image
+      final XFile image = await _controller!.takePicture();
+
+      // Get the application documents directory
+      final Directory appDir = await getApplicationDocumentsDirectory();
+      final String imagePath = '${appDir.path}/liveness_capture.jpg';
+
+      // Copy the image to the app directory
+      await image.saveTo(imagePath);
+
+      // Return success result
+      widget.onResult(LivenessResult(
+        isSuccess: true,
+        imagePath: imagePath,
+      ));
+
+      // Pop the camera view
+      Navigator.pop(context);
+    } catch (e) {
+      print('Error capturing image: $e');
+      widget.onResult(LivenessResult(
+        isSuccess: false,
+        errorMessage: 'Failed to capture image',
+      ));
     }
   }
 
@@ -144,7 +216,7 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
         children: [
           CameraPreview(_controller!),
           CustomPaint(
-            painter: FaceTrackerPainter(_faces),
+            painter: FaceTrackerPainter(_faces, _isFaceAligned),
           ),
           Positioned(
             bottom: 50,
@@ -168,20 +240,20 @@ class _LivenessCameraScreenState extends State<LivenessCameraScreen> {
 
 class FaceTrackerPainter extends CustomPainter {
   final List<Face> faces;
+  final bool isAligned;
 
-  FaceTrackerPainter(this.faces);
+  FaceTrackerPainter(this.faces, this.isAligned);
 
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
-      ..color = Colors.white
+      ..color = isAligned ? Colors.green : Colors.white
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0;
 
     for (Face face in faces) {
       canvas.drawRect(face.boundingBox, paint);
 
-      // Draw landmarks if available
       face.landmarks.forEach((type, landmark) {
         if (landmark != null && landmark.position != null) {
           canvas.drawCircle(
@@ -192,23 +264,10 @@ class FaceTrackerPainter extends CustomPainter {
           );
         }
       });
-
-      // Draw contours if available
-      face.contours.forEach((contourType, contour) {
-        if (contour != null) {
-          final points = contour.points;
-          for (int i = 0; i < points.length - 1; i++) {
-            canvas.drawLine(
-              Offset(points[i].x.toDouble(), points[i].y.toDouble()),
-              Offset(points[i + 1].x.toDouble(), points[i + 1].y.toDouble()),
-              paint,
-            );
-          }
-        }
-      });
     }
   }
 
   @override
-  bool shouldRepaint(FaceTrackerPainter oldDelegate) => true;
+  bool shouldRepaint(FaceTrackerPainter oldDelegate) =>
+      faces != oldDelegate.faces || isAligned != oldDelegate.isAligned;
 }
