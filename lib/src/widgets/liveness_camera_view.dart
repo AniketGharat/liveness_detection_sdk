@@ -36,7 +36,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
   Future<void> _initializeCamera() async {
     _cameras = await availableCameras();
     if (_cameras.isNotEmpty) {
-      _initializeCameraController(_cameras[_currentCameraIndex]);
+      // Find the front camera (index may vary based on your device)
+      final frontCamera = _cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => _cameras
+            .first, // Fall back to first camera if no front camera found
+      );
+      _initializeCameraController(frontCamera);
     }
   }
 
