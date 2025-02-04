@@ -1,135 +1,331 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../models/liveness_state.dart';
-import '../utils/liveness_detection_sdk.dart';
+import '../models/liveness_result.dart';
+import '../models/liveness_config.dart';
+import '../theme/liveness_theme.dart';
+import '../utils/liveness_detector.dart';
 
 class LivenessCameraView extends StatefulWidget {
-  final Function(String)? onImageCaptured;
-  final Function()? onComplete;
+  final Function(LivenessResult)? onResult;
+  final LivenessConfig? config;
+  final LivenessTheme? theme;
+  final bool showDebugInfo;
 
   const LivenessCameraView({
     Key? key,
-    this.onImageCaptured,
-    this.onComplete,
+    this.onResult,
+    this.config,
+    this.theme,
+    this.showDebugInfo = false,
   }) : super(key: key);
 
   @override
   State<LivenessCameraView> createState() => _LivenessCameraViewState();
 }
 
-class _LivenessCameraViewState extends State<LivenessCameraView> {
+class _LivenessCameraViewState extends State<LivenessCameraView>
+    with WidgetsBindingObserver {
   late CameraController _cameraController;
   late LivenessDetector _livenessDetector;
   bool _isInitialized = false;
+  bool _isCameraPermissionGranted = false;
+  StreamSubscription? _resultSubscription;
+  StreamSubscription? _stateSubscription;
+  LivenessState _currentState = LivenessState.initial;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeCamera();
-    _livenessDetector = LivenessDetector();
+    _livenessDetector = LivenessDetector(
+      config: widget.config ?? const LivenessConfig(),
+    );
+    _setupSubscriptions();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Handle app lifecycle changes
+    if (state == AppLifecycleState.inactive) {
+      _cameraController.stopImageStream();
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera();
+    }
+  }
+
+  Future<void> _requestCameraPermission() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        setState(() {
+          _errorMessage = 'No cameras available';
+        });
+        return;
+      }
+      setState(() {
+        _isCameraPermissionGranted = true;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Camera permission denied';
+      });
+    }
   }
 
   Future<void> _initializeCamera() async {
-    final cameras = await availableCameras();
-    final front = cameras.firstWhere(
-          (camera) => camera.lensDirection == CameraLensDirection.front,
-      orElse: () => cameras.first,
-    );
+    if (!_isCameraPermissionGranted) {
+      await _requestCameraPermission();
+      if (!_isCameraPermissionGranted) return;
+    }
 
-    _cameraController = CameraController(
-      front,
-      ResolutionPreset.medium,
-      enableAudio: false,
-    );
-
-    await _cameraController.initialize();
-    if (!mounted) return;
-
-    _cameraController.startImageStream((image) {
-      _livenessDetector.processImage(
-        image,
-        InputImageRotation.rotation0deg, // Adjust based on device orientation
+    try {
+      final cameras = await availableCameras();
+      final front = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
       );
-    });
 
-    setState(() {
-      _isInitialized = true;
-    });
+      _cameraController = CameraController(
+        front,
+        widget.config?.cameraResolution ?? ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.nv21
+            : ImageFormatGroup.bgra8888,
+      );
+
+      await _cameraController.initialize();
+      if (!mounted) return;
+
+      await _cameraController.lockCaptureOrientation(
+        DeviceOrientation.portraitUp,
+      );
+
+      _cameraController.startImageStream((image) {
+        final rotation = _getInputImageRotation(
+          _cameraController.description.sensorOrientation,
+        );
+
+        _livenessDetector.processImage(image, rotation);
+      });
+
+      setState(() {
+        _isInitialized = true;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to initialize camera: $e';
+      });
+    }
+  }
+
+  InputImageRotation _getInputImageRotation(int sensorOrientation) {
+    final rotationIntValue = Platform.isIOS ? 0 : sensorOrientation ~/ 90;
+    return InputImageRotation.values[rotationIntValue];
+  }
+
+  void _setupSubscriptions() {
+    _resultSubscription?.cancel();
+    _resultSubscription = _livenessDetector.detectionResult.listen(
+      (result) {
+        widget.onResult?.call(result);
+        if (result.state == LivenessState.complete) {
+          _captureImage();
+        }
+      },
+    );
+
+    _stateSubscription?.cancel();
+    _stateSubscription = _livenessDetector.livenessState.listen(
+      (state) {
+        setState(() {
+          _currentState = state;
+          if (state != LivenessState.error) {
+            _errorMessage = null;
+          }
+        });
+      },
+    );
+  }
+
+  Future<void> _captureImage() async {
+    try {
+      final xFile = await _cameraController.takePicture();
+      widget.onResult?.call(LivenessResult(
+        isSuccess: true,
+        imagePath: xFile.path,
+        state: LivenessState.complete,
+      ));
+    } catch (e) {
+      widget.onResult?.call(LivenessResult(
+        isSuccess: false,
+        errorMessage: 'Failed to capture image: $e',
+        state: LivenessState.error,
+      ));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_errorMessage != null) {
+      return _buildErrorView();
+    }
+
     if (!_isInitialized) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildLoadingView();
     }
 
     return Stack(
+      fit: StackFit.expand,
       children: [
-        CameraPreview(_cameraController),
+        _buildCameraPreview(),
         _buildOverlay(),
         _buildInstructions(),
+        if (widget.showDebugInfo) _buildDebugInfo(),
       ],
+    );
+  }
+
+  Widget _buildErrorView() {
+    return Container(
+      color: widget.theme?.backgroundColor ?? Colors.black,
+      child: Center(
+        child: Text(
+          _errorMessage ?? 'Unknown error',
+          style: widget.theme?.errorTextStyle ??
+              const TextStyle(color: Colors.red, fontSize: 18),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingView() {
+    return Container(
+      color: widget.theme?.backgroundColor ?? Colors.black,
+      child: Center(
+        child: CircularProgressIndicator(
+          color: widget.theme?.progressIndicatorColor ?? Colors.blue,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCameraPreview() {
+    return Transform.scale(
+      scale: _cameraController.value.aspectRatio /
+          MediaQuery.of(context).size.aspectRatio,
+      child: Center(
+        child: CameraPreview(_cameraController),
+      ),
     );
   }
 
   Widget _buildOverlay() {
     return CustomPaint(
-      painter: FaceOverlayPainter(),
+      painter: FaceOverlayPainter(
+        ovalColor: widget.theme?.ovalColor ?? Colors.white,
+        strokeWidth: widget.theme?.ovalStrokeWidth ?? 2.0,
+      ),
       child: Container(),
     );
   }
 
   Widget _buildInstructions() {
-    return StreamBuilder<LivenessState>(
-      stream: _livenessDetector.livenessState,
-      builder: (context, snapshot) {
-        final state = snapshot.data ?? LivenessState.initial;
-        return Positioned(
-          bottom: 32,
-          left: 16,
-          right: 16,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              _getInstructionText(state),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-              ),
+    return Positioned(
+      bottom: 32,
+      left: 16,
+      right: 16,
+      child: Container(
+        padding: widget.theme?.instructionPadding ?? const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: widget.theme?.overlayColor ?? Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _getInstructionText(),
+              style: widget.theme?.instructionTextStyle ??
+                  const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
               textAlign: TextAlign.center,
             ),
-          ),
-        );
-      },
+            if (_errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _errorMessage!,
+                  style: widget.theme?.errorTextStyle ??
+                      const TextStyle(
+                        color: Colors.red,
+                        fontSize: 16,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
-  String _getInstructionText(LivenessState state) {
-    switch (state) {
+  Widget _buildDebugInfo() {
+    return Positioned(
+      top: 32,
+      left: 16,
+      right: 16,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          'State: $_currentState\n'
+          'Camera Resolution: ${widget.config?.cameraResolution ?? ResolutionPreset.medium}',
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  String _getInstructionText() {
+    switch (_currentState) {
       case LivenessState.initial:
-        return 'Position your face in the frame';
+        return 'Position your face within the oval';
       case LivenessState.lookingStraight:
-        return 'Perfect! Now slowly turn your head left';
+        return 'Perfect! Now slowly turn your head to the left';
       case LivenessState.lookingLeft:
-        return 'Good! Now slowly turn your head right';
+        return 'Good! Now slowly turn your head to the right';
       case LivenessState.lookingRight:
         return 'Great! Now look straight ahead again';
       case LivenessState.lookingStraightAgain:
         return 'Almost done! Keep looking straight';
+      case LivenessState.blinkEyes:
+        return 'Now blink both eyes';
       case LivenessState.complete:
-        return 'Perfect! Taking photo...';
+        return 'Perfect! Processing...';
       case LivenessState.error:
-        return 'Error occurred';
+        return 'Please try again';
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _resultSubscription?.cancel();
+    _stateSubscription?.cancel();
     _cameraController.dispose();
     _livenessDetector.dispose();
     super.dispose();
@@ -137,27 +333,38 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
 }
 
 class FaceOverlayPainter extends CustomPainter {
+  final Color ovalColor;
+  final double strokeWidth;
+
+  FaceOverlayPainter({
+    required this.ovalColor,
+    required this.strokeWidth,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
+      ..color = ovalColor.withOpacity(0.3)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
+      ..strokeWidth = strokeWidth;
 
     final centerX = size.width / 2;
     final centerY = size.height / 2;
-    final ovalSize = size.width * 0.7;
+    final ovalWidth = size.width * 0.7;
+    final ovalHeight = size.height * 0.5;
 
     canvas.drawOval(
       Rect.fromCenter(
         center: Offset(centerX, centerY),
-        width: ovalSize,
-        height: ovalSize,
+        width: ovalWidth,
+        height: ovalHeight,
       ),
       paint,
     );
   }
 
   @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
+  bool shouldRepaint(FaceOverlayPainter oldDelegate) =>
+      ovalColor != oldDelegate.ovalColor ||
+      strokeWidth != oldDelegate.strokeWidth;
 }

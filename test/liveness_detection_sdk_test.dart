@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:liveness_detection_sdk/src/utils/liveness_detection_sdk.dart';
+import 'package:liveness_detection_sdk/src/utils/liveness_detector.dart';
 
 void main() {
   /*test('adds one to input values', () {
