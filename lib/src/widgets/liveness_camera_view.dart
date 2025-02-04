@@ -21,38 +21,63 @@ class LivenessCameraView extends StatefulWidget {
   State<LivenessCameraView> createState() => _LivenessCameraViewState();
 }
 
-class _LivenessCameraViewState extends State<LivenessCameraView> {
-  late CameraController _cameraController;
-  late LivenessDetector _livenessDetector;
+class _LivenessCameraViewState extends State<LivenessCameraView>
+    with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  LivenessDetector? _livenessDetector;
   bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeCamera();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final CameraController? cameraController = _cameraController;
+
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      _disposeResources();
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera();
+    }
+  }
+
   Future<void> _initializeCamera() async {
-    final cameras = await availableCameras();
-    final front = cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.front,
-      orElse: () => cameras.first,
-    );
+    if (_cameraController != null) return;
 
-    _cameraController = CameraController(
-      front,
-      ResolutionPreset.medium,
-      enableAudio: false,
-    );
+    try {
+      final cameras = await availableCameras();
+      final front = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
 
-    await _cameraController.initialize();
-    if (!mounted) return;
+      _cameraController = CameraController(
+        front,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.bgra8888,
+      );
 
-    setState(() {
-      _isInitialized = true;
-    });
+      await _cameraController?.initialize();
 
-    _startLivenessDetection();
+      if (!mounted) return;
+
+      setState(() {
+        _isInitialized = true;
+      });
+
+      _startLivenessDetection();
+    } catch (e) {
+      print('Error initializing camera: $e');
+    }
   }
 
   void _startLivenessDetection() {
@@ -60,47 +85,67 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       config: widget.config ?? const LivenessConfig(),
     );
 
-    // Start processing frames
-    _cameraController.startImageStream((image) {
-      // Process each frame
-      _livenessDetector.processImage(
+    _livenessDetector?.detectionResult.listen((result) {
+      if (result.isSuccess || result.state == LivenessState.error) {
+        widget.onResult?.call(result);
+      }
+    });
+
+    _cameraController?.startImageStream((image) {
+      _livenessDetector?.processImage(
         image,
         InputImageRotation.rotation0deg,
       );
     });
   }
 
+  Future<void> _disposeResources() async {
+    await _livenessDetector?.dispose();
+    _livenessDetector = null;
+
+    await _cameraController?.stopImageStream();
+    await _cameraController?.dispose();
+    _cameraController = null;
+
+    if (mounted) {
+      setState(() {
+        _isInitialized = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (!_isInitialized) {
+    if (!_isInitialized || _cameraController == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
     return Stack(
       children: [
-        CameraPreview(_cameraController),
+        CameraPreview(_cameraController!),
         CustomPaint(
+          size: Size.infinite,
           painter: FaceOverlayPainter(),
-          child: Container(),
         ),
-        StreamBuilder<LivenessState>(
-          stream: _livenessDetector.livenessState,
-          builder: (context, snapshot) {
-            return Positioned(
-              bottom: 32,
-              left: 16,
-              right: 16,
-              child: Text(
-                _getInstructionText(snapshot.data ?? LivenessState.initial),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
+        if (_livenessDetector != null)
+          StreamBuilder<LivenessState>(
+            stream: _livenessDetector!.livenessState,
+            builder: (context, snapshot) {
+              return Positioned(
+                bottom: 32,
+                left: 16,
+                right: 16,
+                child: Text(
+                  _getInstructionText(snapshot.data ?? LivenessState.initial),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
-              ),
-            );
-          },
-        ),
+              );
+            },
+          ),
       ],
     );
   }
@@ -111,7 +156,14 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
         return 'Position your face within the oval';
       case LivenessState.lookingStraight:
         return 'Perfect! Now slowly turn your head left';
-      // Add other state messages...
+      case LivenessState.lookingLeft:
+        return 'Great! Now turn your head right';
+      case LivenessState.lookingRight:
+        return 'Almost done! Look straight ahead';
+      case LivenessState.complete:
+        return 'Verification complete!';
+      case LivenessState.error:
+        return 'Please try again';
       default:
         return '';
     }
@@ -119,8 +171,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
 
   @override
   void dispose() {
-    _cameraController.dispose();
-    _livenessDetector.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _disposeResources();
     super.dispose();
   }
 }
