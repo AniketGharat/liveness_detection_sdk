@@ -1,26 +1,12 @@
-// liveness_camera_view.dart
 import 'dart:io';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_ml_kit/google_ml_kit.dart';
-import 'package:vibration/vibration.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-
-// Define the LivenessResult class
-class LivenessResult {
-  final bool isSuccess;
-  final String? imagePath;
-  final String? errorMessage;
-
-  LivenessResult({
-    required this.isSuccess,
-    this.imagePath,
-    this.errorMessage,
-  });
-}
+import 'package:permission_handler/permission_handler.dart';
+import '../models/liveness_result.dart';
 
 class LivenessCameraView extends StatefulWidget {
   final Function(LivenessResult) onResult;
@@ -164,26 +150,17 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
-      // Stop the image stream
       await _controller?.stopImageStream();
-
-      // Capture the image
       final XFile image = await _controller!.takePicture();
-
-      // Get the application documents directory
       final Directory appDir = await getApplicationDocumentsDirectory();
       final String imagePath = '${appDir.path}/liveness_capture.jpg';
-
-      // Copy the image to the app directory
       await image.saveTo(imagePath);
 
-      // Return success result
       widget.onResult(LivenessResult(
         isSuccess: true,
         imagePath: imagePath,
       ));
 
-      // Pop the camera view
       Navigator.pop(context);
     } catch (e) {
       print('Error capturing image: $e');
