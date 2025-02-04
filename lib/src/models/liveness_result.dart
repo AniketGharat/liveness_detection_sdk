@@ -2,16 +2,14 @@ import 'liveness_state.dart';
 
 class LivenessResult {
   final bool isSuccess;
-  final String? imagePath;
-  final String? errorMessage;
   final LivenessState state;
-  final Map<String, dynamic>? metadata;
+  final String? errorMessage;
+  final String? imagePath;
 
   LivenessResult({
     required this.isSuccess,
-    this.imagePath,
-    this.errorMessage,
     required this.state,
-    this.metadata,
+    this.errorMessage,
+    this.imagePath,
   });
 }
