@@ -3,7 +3,7 @@ class LivenessResult {
   final String? imagePath;
   final String? errorMessage;
 
-  LivenessResult({
+  const LivenessResult({
     required this.isSuccess,
     this.imagePath,
     this.errorMessage,
