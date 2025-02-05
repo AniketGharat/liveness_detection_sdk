@@ -19,8 +19,8 @@ class LivenessDetector {
   bool _isFaceDetected = false;
 
   int _centeredFrames = 0;
-  int _rightFrames = 0;
   int _leftFrames = 0;
+  int _rightFrames = 0;
   double _progress = 0.0;
 
   LivenessDetector({
@@ -34,7 +34,7 @@ class LivenessDetector {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
-      minFaceSize: 0.15,
+      minFaceSize: 0.15, // Reduced to detect faces more easily
       performanceMode: FaceDetectorMode.accurate,
     );
     _faceDetector = FaceDetector(options: options);
@@ -87,8 +87,8 @@ class LivenessDetector {
 
   void _resetProgress() {
     _centeredFrames = 0;
-    _rightFrames = 0;
     _leftFrames = 0;
+    _rightFrames = 0;
     _progress = 0.0;
     _currentState = LivenessState.initial;
   }
@@ -96,11 +96,9 @@ class LivenessDetector {
   Future<void> _updateFacePosition(Face face) async {
     final double? eulerY = face.headEulerAngleY;
 
-    if (!_isFaceCentered(face) && _currentState != LivenessState.initial) {
-      _resetProgress();
-      onStateChanged(LivenessState.initial, 0.0);
-      return;
-    }
+    // Debug print for face angles
+    print(
+        'Face angles - Y: ${face.headEulerAngleY}, Z: ${face.headEulerAngleZ}');
 
     switch (_currentState) {
       case LivenessState.initial:
@@ -115,17 +113,6 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingStraight:
-        if (eulerY != null && eulerY > config.turnThreshold) {
-          _rightFrames++;
-          if (_rightFrames >= config.requiredFrames) {
-            _updateState(LivenessState.lookingRight);
-          }
-        } else {
-          _rightFrames = 0;
-        }
-        break;
-
-      case LivenessState.lookingRight:
         if (eulerY != null && eulerY < -config.turnThreshold) {
           _leftFrames++;
           if (_leftFrames >= config.requiredFrames) {
@@ -137,13 +124,19 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (_isFaceCentered(face)) {
-          _centeredFrames++;
-          if (_centeredFrames >= config.requiredFrames) {
-            _updateState(LivenessState.complete);
+        if (eulerY != null && eulerY > config.turnThreshold) {
+          _rightFrames++;
+          if (_rightFrames >= config.requiredFrames) {
+            _updateState(LivenessState.lookingRight);
           }
         } else {
-          _centeredFrames = 0;
+          _rightFrames = 0;
+        }
+        break;
+
+      case LivenessState.lookingRight:
+        if (_isFaceCentered(face)) {
+          _updateState(LivenessState.complete);
         }
         break;
 
@@ -166,8 +159,8 @@ class LivenessDetector {
     _progress = switch (_currentState) {
       LivenessState.initial => 0.0,
       LivenessState.lookingStraight => 0.25,
-      LivenessState.lookingRight => 0.5,
-      LivenessState.lookingLeft => 0.75,
+      LivenessState.lookingLeft => 0.5,
+      LivenessState.lookingRight => 0.75,
       LivenessState.complete => 1.0,
     };
 

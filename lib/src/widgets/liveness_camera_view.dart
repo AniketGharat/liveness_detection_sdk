@@ -27,8 +27,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   CameraController? _controller;
   late final LivenessDetector _livenessDetector;
   late final AnimationController _progressController;
-  List<CameraDescription> cameras = [];
-  int _selectedCameraIndex = 0; // Will be set in initializeCamera
 
   String _instruction = "Position your face in the circle";
   Color _circleColor = Colors.white;
@@ -58,25 +56,14 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       return;
     }
 
-    cameras = await availableCameras();
-
-    // Find the front camera index
-    _selectedCameraIndex = cameras.indexWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.front);
-    if (_selectedCameraIndex == -1) _selectedCameraIndex = 0;
-
-    await _setupCamera();
-  }
-
-  Future<void> _setupCamera() async {
-    if (cameras.isEmpty) return;
-
-    if (_controller != null) {
-      await _controller!.dispose();
-    }
+    final cameras = await availableCameras();
+    final frontCamera = cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.front,
+      orElse: () => cameras.first,
+    );
 
     _controller = CameraController(
-      cameras[_selectedCameraIndex],
+      frontCamera,
       ResolutionPreset.high,
       enableAudio: false,
     );
@@ -92,18 +79,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  Future<void> _switchCamera() async {
-    if (_controller != null) {
-      await _controller!.stopImageStream();
-    }
-
-    setState(() {
-      _selectedCameraIndex = (_selectedCameraIndex + 1) % cameras.length;
-    });
-
-    await _setupCamera();
-  }
-
   void _handleStateChanged(LivenessState state, double progress) {
     setState(() {
       _progress = progress;
@@ -114,16 +89,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
           _circleColor = Colors.white;
           break;
         case LivenessState.lookingStraight:
-          _instruction = "Good! Now turn your head right slowly";
-          _circleColor = Colors.green;
-          Vibration.vibrate(duration: 100);
-          break;
-        case LivenessState.lookingRight:
-          _instruction = "Perfect! Now turn your head left slowly";
+          _instruction = "Good! Now turn your head left slowly";
           _circleColor = Colors.green;
           Vibration.vibrate(duration: 100);
           break;
         case LivenessState.lookingLeft:
+          _instruction = "Perfect! Now turn your head right slowly";
+          _circleColor = Colors.green;
+          Vibration.vibrate(duration: 100);
+          break;
+        case LivenessState.lookingRight:
           _instruction = "Great! Now center your face";
           _circleColor = Colors.green;
           Vibration.vibrate(duration: 100);
@@ -198,16 +173,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               circleSize: widget.config.circleSize,
             ),
           ),
-          // Camera switch button
-          Positioned(
-            top: 40,
-            right: 20,
-            child: IconButton(
-              icon: const Icon(Icons.switch_camera,
-                  color: Colors.white, size: 30),
-              onPressed: _switchCamera,
-            ),
-          ),
           Positioned(
             bottom: 50,
             left: 20,
@@ -262,36 +227,20 @@ class FaceDetectionPainter extends CustomPainter {
 
     canvas.drawCircle(center, radius, circlePaint);
 
-    // Progress arc - Draw quarter circles based on progress
+    // Progress arc
     if (progress > 0) {
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0;
 
-      // Draw completed quarter circles
-      final completedQuarters = (progress * 4).floor();
-      for (var i = 0; i < completedQuarters; i++) {
-        canvas.drawArc(
-          Rect.fromCircle(center: center, radius: radius),
-          -pi / 2 + (i * pi / 2),
-          pi / 2,
-          false,
-          progressPaint,
-        );
-      }
-
-      // Draw current quarter progress
-      final remainingProgress = progress * 4 - completedQuarters;
-      if (remainingProgress > 0) {
-        canvas.drawArc(
-          Rect.fromCircle(center: center, radius: radius),
-          -pi / 2 + (completedQuarters * pi / 2),
-          (remainingProgress * pi / 2),
-          false,
-          progressPaint,
-        );
-      }
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -pi / 2,
+        2 * pi * progress,
+        false,
+        progressPaint,
+      );
     }
   }
 
