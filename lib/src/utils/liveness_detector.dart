@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
-import 'package:google_ml_kit/google_ml_kit.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
@@ -30,13 +30,12 @@ class LivenessDetector {
   }
 
   void _initializeFaceDetector() {
-    _faceDetector = GoogleMlKit.vision.faceDetector(
-      FaceDetectorOptions(
-        enableLandmarks: true,
-        enableClassification: true,
-        minFaceSize: 0.25,
-      ),
+    final options = FaceDetectorOptions(
+      enableLandmarks: true,
+      enableClassification: true,
+      minFaceSize: 0.25,
     );
+    _faceDetector = FaceDetector(options: options);
   }
 
   Future<void> processImage(CameraImage image) async {
