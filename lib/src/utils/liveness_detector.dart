@@ -16,6 +16,7 @@ class LivenessDetector {
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
+  bool _isFaceDetected = false;
 
   int _centeredFrames = 0;
   int _leftFrames = 0;
@@ -33,7 +34,8 @@ class LivenessDetector {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
-      minFaceSize: 0.25,
+      minFaceSize: 0.15, // Reduced to detect faces more easily
+      performanceMode: FaceDetectorMode.accurate,
     );
     _faceDetector = FaceDetector(options: options);
   }
@@ -46,8 +48,15 @@ class LivenessDetector {
       final inputImage = await _convertCameraImageToInputImage(image);
       final faces = await _faceDetector.processImage(inputImage);
 
-      if (faces.isNotEmpty) {
-        _updateFacePosition(faces.first);
+      if (faces.isEmpty) {
+        if (_isFaceDetected) {
+          _isFaceDetected = false;
+          _resetProgress();
+          onStateChanged(LivenessState.initial, 0.0);
+        }
+      } else {
+        _isFaceDetected = true;
+        await _updateFacePosition(faces.first);
       }
     } catch (e) {
       print('Error processing image: $e');
@@ -65,7 +74,7 @@ class LivenessDetector {
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: InputImageRotation.rotation0deg,
+      rotation: InputImageRotation.rotation270deg, // Adjusted for front camera
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
@@ -76,8 +85,20 @@ class LivenessDetector {
     );
   }
 
-  void _updateFacePosition(Face face) {
+  void _resetProgress() {
+    _centeredFrames = 0;
+    _leftFrames = 0;
+    _rightFrames = 0;
+    _progress = 0.0;
+    _currentState = LivenessState.initial;
+  }
+
+  Future<void> _updateFacePosition(Face face) async {
     final double? eulerY = face.headEulerAngleY;
+
+    // Debug print for face angles
+    print(
+        'Face angles - Y: ${face.headEulerAngleY}, Z: ${face.headEulerAngleZ}');
 
     switch (_currentState) {
       case LivenessState.initial:
@@ -97,6 +118,8 @@ class LivenessDetector {
           if (_leftFrames >= config.requiredFrames) {
             _updateState(LivenessState.lookingLeft);
           }
+        } else {
+          _leftFrames = 0;
         }
         break;
 
@@ -106,6 +129,8 @@ class LivenessDetector {
           if (_rightFrames >= config.requiredFrames) {
             _updateState(LivenessState.lookingRight);
           }
+        } else {
+          _rightFrames = 0;
         }
         break;
 
@@ -123,6 +148,7 @@ class LivenessDetector {
   bool _isFaceCentered(Face face) {
     final double? eulerY = face.headEulerAngleY;
     final double? eulerZ = face.headEulerAngleZ;
+
     return (eulerY != null && eulerY.abs() < config.straightThreshold) &&
         (eulerZ != null && eulerZ.abs() < config.straightThreshold);
   }
@@ -130,7 +156,6 @@ class LivenessDetector {
   void _updateState(LivenessState newState) {
     _currentState = newState;
 
-    // Calculate progress
     _progress = switch (_currentState) {
       LivenessState.initial => 0.0,
       LivenessState.lookingStraight => 0.25,
