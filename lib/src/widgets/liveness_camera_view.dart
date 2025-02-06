@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
+import 'package:image/image.dart' as img;
 
 import '../../liveness_sdk.dart';
 
@@ -67,6 +68,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       frontCamera,
       ResolutionPreset.high,
       enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.bgra8888,
     );
 
     try {
@@ -84,28 +86,30 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     setState(() {
       _progress = progress;
 
-      if (!_isFaceDetected) {
+      if (state == LivenessState.initial && _isFaceDetected) {
         _instruction = "Face not detected";
         _circleColor = Colors.red;
+        _isFaceDetected = false;
         return;
       }
 
+      _isFaceDetected = true;
       switch (state) {
         case LivenessState.initial:
           _instruction = "Position your face in the circle";
           _circleColor = Colors.white;
           break;
         case LivenessState.lookingStraight:
-          _instruction = "Good! Now turn your head left slowly";
-          _circleColor = Colors.green;
-          Vibration.vibrate(duration: 100);
-          break;
-        case LivenessState.lookingLeft:
-          _instruction = "Perfect! Now turn your head right slowly";
+          _instruction = "Good! Now turn your head right slowly";
           _circleColor = Colors.green;
           Vibration.vibrate(duration: 100);
           break;
         case LivenessState.lookingRight:
+          _instruction = "Perfect! Now turn your head left slowly";
+          _circleColor = Colors.green;
+          Vibration.vibrate(duration: 100);
+          break;
+        case LivenessState.lookingLeft:
           _instruction = "Great! Now center your face";
           _circleColor = Colors.green;
           Vibration.vibrate(duration: 100);
@@ -128,16 +132,29 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       await _controller!.stopImageStream();
       final XFile photo = await _controller!.takePicture();
 
+      final File originalFile = File(photo.path);
       final Directory appDir = await getApplicationDocumentsDirectory();
       final String imagePath = '${appDir.path}/liveness_capture.jpg';
 
-      // Just copy the file without any transformation
-      await File(photo.path).copy(imagePath);
+      // Read and process the image
+      final bytes = await originalFile.readAsBytes();
+      var image = img.decodeImage(bytes);
 
-      widget.onResult(LivenessResult(
-        isSuccess: true,
-        imagePath: imagePath,
-      ));
+      if (image != null) {
+        // Only rotate the image, don't flip it to maintain mirror effect
+        image = img.copyRotate(image, angle: 90);
+
+        // Save the processed image
+        final processedBytes = img.encodeJpg(image);
+        await File(imagePath).writeAsBytes(processedBytes);
+
+        widget.onResult(LivenessResult(
+          isSuccess: true,
+          imagePath: imagePath,
+        ));
+      } else {
+        throw Exception('Failed to process image');
+      }
 
       Navigator.pop(context);
     } catch (e) {
@@ -166,7 +183,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   Widget build(BuildContext context) {
     if (_controller == null || !_controller!.value.isInitialized) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Colors.white,
+          ),
+        ),
       );
     }
 
@@ -175,11 +197,19 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.rotationY(pi), // Flip horizontally
-            child: CameraPreview(_controller!),
+          // Camera preview with transform for mirroring
+          Transform.scale(
+            scale: 1.0,
+            child: Center(
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..scale(-1.0, 1.0, 1.0), // Mirror horizontally
+                child: CameraPreview(_controller!),
+              ),
+            ),
           ),
+          // Overlay for face detection
           CustomPaint(
             painter: FaceDetectionPainter(
               progress: _progress,
@@ -187,6 +217,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               circleSize: widget.config.circleSize,
             ),
           ),
+          // Instructions overlay
           Positioned(
             bottom: 50,
             left: 20,
@@ -233,7 +264,7 @@ class FaceDetectionPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
-    // Draw complete circle in white/red
+    // Draw guide circle
     final circlePaint = Paint()
       ..color = circleColor
       ..style = PaintingStyle.stroke
@@ -241,20 +272,34 @@ class FaceDetectionPainter extends CustomPainter {
 
     canvas.drawCircle(center, radius, circlePaint);
 
-    // Draw completed quarters in green
+    // Draw progress arc in quarters
     if (progress > 0) {
-      final completedQuarters = (progress / 0.25).floor();
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0;
 
-      for (var i = 0; i < completedQuarters; i++) {
-        final startAngle = -pi / 2 + (i * pi / 2);
+      final quarterTurns = (progress / 0.25).floor();
+      final startAngle = -pi / 2;
+
+      // Draw completed quarters
+      for (var i = 0; i < quarterTurns; i++) {
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: radius),
-          startAngle,
+          startAngle + (i * pi / 2),
           pi / 2,
+          false,
+          progressPaint,
+        );
+      }
+
+      // Draw current quarter progress if not at a quarter boundary
+      if (progress % 0.25 > 0) {
+        final currentQuarterProgress = (progress % 0.25) * 4;
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius),
+          startAngle + (quarterTurns * pi / 2),
+          currentQuarterProgress * pi / 2,
           false,
           progressPaint,
         );

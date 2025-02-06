@@ -17,12 +17,10 @@ class LivenessDetector {
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
   bool _isFaceDetected = false;
-  LivenessState _lastCompletedState = LivenessState.initial;
-
-  int _centeredFrames = 0;
-  int _leftFrames = 0;
-  int _rightFrames = 0;
+  Timer? _faceDetectionTimer;
   double _progress = 0.0;
+
+  int _requiredFramesCount = 0;
 
   LivenessDetector({
     required this.config,
@@ -36,9 +34,43 @@ class LivenessDetector {
       enableLandmarks: true,
       enableClassification: true,
       minFaceSize: 0.15,
-      performanceMode: FaceDetectorMode.accurate,
+      performanceMode: FaceDetectorMode.fast,
     );
     _faceDetector = FaceDetector(options: options);
+  }
+
+  Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
+    // Get the width and height of the image
+    final width = image.width;
+    final height = image.height;
+
+    // Get the raw plane data
+    final planes = image.planes;
+
+    // Create a WriteBuffer to store all bytes
+    final WriteBuffer allBytes = WriteBuffer();
+
+    // Write all planes to the buffer
+    for (var plane in planes) {
+      allBytes.putUint8List(plane.bytes);
+    }
+
+    // Get the consolidated bytes
+    final bytes = allBytes.done().buffer.asUint8List();
+
+    // Create the InputImageData
+    final metadata = InputImageMetadata(
+      size: Size(width.toDouble(), height.toDouble()),
+      rotation: InputImageRotation.rotation270deg, // For front camera
+      format: InputImageFormat.bgra8888, // Most common format for Android/iOS
+      bytesPerRow: image.planes[0].bytesPerRow,
+    );
+
+    // Create and return the InputImage
+    return InputImage.fromBytes(
+      bytes: bytes,
+      metadata: metadata,
+    );
   }
 
   Future<void> processImage(CameraImage image) async {
@@ -52,13 +84,15 @@ class LivenessDetector {
       if (faces.isEmpty) {
         if (_isFaceDetected) {
           _isFaceDetected = false;
+          _resetProgress();
           onStateChanged(LivenessState.initial, _progress);
+          _faceDetectionTimer?.cancel();
         }
       } else {
         if (!_isFaceDetected) {
           _isFaceDetected = true;
-          // Resume from last completed state
-          _currentState = _lastCompletedState;
+          _currentState = LivenessState.initial;
+          _startFaceDetectionTimer();
         }
         await _updateFacePosition(faces.first);
       }
@@ -69,79 +103,67 @@ class LivenessDetector {
     }
   }
 
-  Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
-    final WriteBuffer allBytes = WriteBuffer();
-    for (var plane in image.planes) {
-      allBytes.putUint8List(plane.bytes);
-    }
-    final bytes = allBytes.done().buffer.asUint8List();
-
-    final metadata = InputImageMetadata(
-      size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: InputImageRotation.rotation270deg,
-      format: InputImageFormat.bgra8888,
-      bytesPerRow: image.planes[0].bytesPerRow,
-    );
-
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: metadata,
-    );
+  void _startFaceDetectionTimer() {
+    _faceDetectionTimer?.cancel();
+    _faceDetectionTimer = Timer(const Duration(seconds: 1), () {
+      if (_isFaceDetected && _currentState == LivenessState.initial) {
+        _updateState(LivenessState.lookingStraight);
+      }
+    });
   }
 
   void _resetProgress() {
-    _centeredFrames = 0;
-    _leftFrames = 0;
-    _rightFrames = 0;
-    // Don't reset progress to maintain the circle completion
+    _requiredFramesCount = 0;
+    _currentState = LivenessState.initial;
+    _progress = 0.0;
   }
 
   Future<void> _updateFacePosition(Face face) async {
     final double? eulerY = face.headEulerAngleY;
-    // Flip the euler angle for correct left/right detection
     final double? adjustedEulerY = eulerY != null ? -eulerY : null;
 
     switch (_currentState) {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
-          _centeredFrames++;
-          if (_centeredFrames >= config.requiredFrames) {
+          _requiredFramesCount++;
+          if (_requiredFramesCount >= 5) {
             _updateState(LivenessState.lookingStraight);
-            _lastCompletedState = LivenessState.lookingStraight;
           }
         } else {
-          _centeredFrames = 0;
+          _requiredFramesCount = 0;
         }
         break;
 
       case LivenessState.lookingStraight:
         if (adjustedEulerY != null && adjustedEulerY < -config.turnThreshold) {
-          _leftFrames++;
-          if (_leftFrames >= config.requiredFrames) {
+          _requiredFramesCount++;
+          if (_requiredFramesCount >= 5) {
             _updateState(LivenessState.lookingLeft);
-            _lastCompletedState = LivenessState.lookingLeft;
           }
         } else {
-          _leftFrames = 0;
+          _requiredFramesCount = 0;
         }
         break;
 
       case LivenessState.lookingLeft:
         if (adjustedEulerY != null && adjustedEulerY > config.turnThreshold) {
-          _rightFrames++;
-          if (_rightFrames >= config.requiredFrames) {
+          _requiredFramesCount++;
+          if (_requiredFramesCount >= 5) {
             _updateState(LivenessState.lookingRight);
-            _lastCompletedState = LivenessState.lookingRight;
           }
         } else {
-          _rightFrames = 0;
+          _requiredFramesCount = 0;
         }
         break;
 
       case LivenessState.lookingRight:
         if (_isFaceCentered(face)) {
-          _updateState(LivenessState.complete);
-          _lastCompletedState = LivenessState.complete;
+          _requiredFramesCount++;
+          if (_requiredFramesCount >= 5) {
+            _updateState(LivenessState.complete);
+          }
+        } else {
+          _requiredFramesCount = 0;
         }
         break;
 
@@ -167,11 +189,12 @@ class LivenessDetector {
       LivenessState.lookingRight => 0.75,
       LivenessState.complete => 1.0,
     };
-
+    _requiredFramesCount = 0;
     onStateChanged(_currentState, _progress);
   }
 
   Future<void> dispose() async {
+    _faceDetectionTimer?.cancel();
     await _faceDetector.close();
   }
 }
