@@ -52,14 +52,14 @@ class LivenessDetector {
       if (faces.isEmpty) {
         if (_isFaceDetected) {
           _isFaceDetected = false;
-          if (_currentState != LivenessState.initial) {
-            _currentState = _lastCompletedState;
-            onStateChanged(_currentState, _progress);
-          }
           onStateChanged(LivenessState.initial, _progress);
         }
       } else {
-        _isFaceDetected = true;
+        if (!_isFaceDetected) {
+          _isFaceDetected = true;
+          // Resume from last completed state
+          _currentState = _lastCompletedState;
+        }
         await _updateFacePosition(faces.first);
       }
     } catch (e) {
@@ -93,12 +93,13 @@ class LivenessDetector {
     _centeredFrames = 0;
     _leftFrames = 0;
     _rightFrames = 0;
-    _currentState = LivenessState.initial;
-    // Keep the progress value for partial circle completion
+    // Don't reset progress to maintain the circle completion
   }
 
   Future<void> _updateFacePosition(Face face) async {
     final double? eulerY = face.headEulerAngleY;
+    // Flip the euler angle for correct left/right detection
+    final double? adjustedEulerY = eulerY != null ? -eulerY : null;
 
     switch (_currentState) {
       case LivenessState.initial:
@@ -114,21 +115,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingStraight:
-        // Changed direction: now check for right turn first
-        if (eulerY != null && eulerY > config.turnThreshold) {
-          _rightFrames++;
-          if (_rightFrames >= config.requiredFrames) {
-            _updateState(LivenessState.lookingRight);
-            _lastCompletedState = LivenessState.lookingRight;
-          }
-        } else {
-          _rightFrames = 0;
-        }
-        break;
-
-      case LivenessState.lookingRight:
-        // Changed direction: now check for left turn
-        if (eulerY != null && eulerY < -config.turnThreshold) {
+        if (adjustedEulerY != null && adjustedEulerY < -config.turnThreshold) {
           _leftFrames++;
           if (_leftFrames >= config.requiredFrames) {
             _updateState(LivenessState.lookingLeft);
@@ -140,6 +127,18 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
+        if (adjustedEulerY != null && adjustedEulerY > config.turnThreshold) {
+          _rightFrames++;
+          if (_rightFrames >= config.requiredFrames) {
+            _updateState(LivenessState.lookingRight);
+            _lastCompletedState = LivenessState.lookingRight;
+          }
+        } else {
+          _rightFrames = 0;
+        }
+        break;
+
+      case LivenessState.lookingRight:
         if (_isFaceCentered(face)) {
           _updateState(LivenessState.complete);
           _lastCompletedState = LivenessState.complete;
@@ -161,12 +160,11 @@ class LivenessDetector {
 
   void _updateState(LivenessState newState) {
     _currentState = newState;
-
     _progress = switch (_currentState) {
       LivenessState.initial => 0.0,
       LivenessState.lookingStraight => 0.25,
-      LivenessState.lookingRight => 0.5,
-      LivenessState.lookingLeft => 0.75,
+      LivenessState.lookingLeft => 0.5,
+      LivenessState.lookingRight => 0.75,
       LivenessState.complete => 1.0,
     };
 

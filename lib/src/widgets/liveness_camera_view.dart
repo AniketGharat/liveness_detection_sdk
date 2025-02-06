@@ -5,7 +5,6 @@ import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
-import 'package:image/image.dart' as img; // Add this package to pubspec.yaml
 
 import '../../liveness_sdk.dart';
 
@@ -85,30 +84,28 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     setState(() {
       _progress = progress;
 
-      if (state == LivenessState.initial && _isFaceDetected) {
+      if (!_isFaceDetected) {
         _instruction = "Face not detected";
         _circleColor = Colors.red;
-        _isFaceDetected = false;
         return;
       }
 
-      _isFaceDetected = true;
       switch (state) {
         case LivenessState.initial:
           _instruction = "Position your face in the circle";
           _circleColor = Colors.white;
           break;
         case LivenessState.lookingStraight:
-          _instruction = "Good! Now turn your head right slowly";
-          _circleColor = Colors.green;
-          Vibration.vibrate(duration: 100);
-          break;
-        case LivenessState.lookingRight:
-          _instruction = "Perfect! Now turn your head left slowly";
+          _instruction = "Good! Now turn your head left slowly";
           _circleColor = Colors.green;
           Vibration.vibrate(duration: 100);
           break;
         case LivenessState.lookingLeft:
+          _instruction = "Perfect! Now turn your head right slowly";
+          _circleColor = Colors.green;
+          Vibration.vibrate(duration: 100);
+          break;
+        case LivenessState.lookingRight:
           _instruction = "Great! Now center your face";
           _circleColor = Colors.green;
           Vibration.vibrate(duration: 100);
@@ -131,25 +128,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       await _controller!.stopImageStream();
       final XFile photo = await _controller!.takePicture();
 
-      // Fix image orientation
-      final File originalFile = File(photo.path);
       final Directory appDir = await getApplicationDocumentsDirectory();
       final String imagePath = '${appDir.path}/liveness_capture.jpg';
 
-      // Read the image
-      final bytes = await originalFile.readAsBytes();
-      var image = img.decodeImage(bytes);
-
-      if (image != null) {
-        // Flip the image horizontally for front camera
-        image = img.flipHorizontal(image);
-        // Rotate the image to correct orientation
-        image = img.copyRotate(image, angle: 90);
-
-        // Save the processed image
-        final processedBytes = img.encodeJpg(image);
-        await File(imagePath).writeAsBytes(processedBytes);
-      }
+      // Just copy the file without any transformation
+      await File(photo.path).copy(imagePath);
 
       widget.onResult(LivenessResult(
         isSuccess: true,
@@ -192,11 +175,10 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Transform.scale(
-            scale: 1.0,
-            child: Center(
-              child: CameraPreview(_controller!),
-            ),
+          Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.rotationY(pi), // Flip horizontally
+            child: CameraPreview(_controller!),
           ),
           CustomPaint(
             painter: FaceDetectionPainter(
@@ -251,7 +233,7 @@ class FaceDetectionPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
-    // Guide circle
+    // Draw complete circle in white/red
     final circlePaint = Paint()
       ..color = circleColor
       ..style = PaintingStyle.stroke
@@ -259,24 +241,24 @@ class FaceDetectionPainter extends CustomPainter {
 
     canvas.drawCircle(center, radius, circlePaint);
 
-    // Progress arc - draw only the current quarter
+    // Draw completed quarters in green
     if (progress > 0) {
+      final completedQuarters = (progress / 0.25).floor();
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0;
 
-      // Calculate which quarter to fill and how much
-      final quarterProgress = (progress % 0.25) * 4;
-      final startAngle = -pi / 2 + (2 * pi * (progress - (progress % 0.25)));
-
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        2 * pi * 0.25 * quarterProgress,
-        false,
-        progressPaint,
-      );
+      for (var i = 0; i < completedQuarters; i++) {
+        final startAngle = -pi / 2 + (i * pi / 2);
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius),
+          startAngle,
+          pi / 2,
+          false,
+          progressPaint,
+        );
+      }
     }
   }
 
