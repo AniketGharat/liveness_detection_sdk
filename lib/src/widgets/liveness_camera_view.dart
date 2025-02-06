@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:vibration/vibration.dart'; // Added for vibration feedback
+import 'package:vibration/vibration.dart';
 import '../../liveness_sdk.dart';
 
 class LivenessCameraView extends StatefulWidget {
@@ -27,9 +27,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
   String _instruction = "Position your face in the circle";
   Color _circleColor = Colors.white;
   double _progress = 0.0;
+  bool _isFaceDetected = false;
   bool _isCompleted = false;
-
-  String? _capturedImagePath;
 
   @override
   void initState() {
@@ -74,6 +73,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
   void _handleStateChanged(LivenessState state, double progress) {
     setState(() {
       _progress = progress;
+
       switch (state) {
         case LivenessState.initial:
           _instruction = "Position your face in the circle";
@@ -82,44 +82,37 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
         case LivenessState.lookingStraight:
           _instruction = "Perfect! Now slowly turn your head left";
           _circleColor = Colors.white;
+          _vibrateFeedback();
           break;
         case LivenessState.lookingLeft:
           _instruction = "Perfect! Now slowly turn your head right";
           _circleColor = Colors.white;
+          _vibrateFeedback();
           break;
         case LivenessState.lookingRight:
           _instruction = "Great! Now center your face";
           _circleColor = Colors.white;
+          _vibrateFeedback();
           break;
         case LivenessState.complete:
           _instruction = "Perfect! Processing...";
           _circleColor = Colors.white;
           _isCompleted = true;
+          _vibrateFeedback();
           _capturePhoto();
           break;
         default:
           _circleColor = Colors.red;
           break;
       }
-      _vibrateFeedback(state); // Added vibration feedback
     });
   }
 
-  // Trigger vibration feedback for each step
-  void _vibrateFeedback(LivenessState state) {
-    if (Vibration.hasVibrator() == true) {
-      switch (state) {
-        case LivenessState.lookingStraight:
-        case LivenessState.lookingLeft:
-        case LivenessState.lookingRight:
-          Vibration.vibrate(duration: 500); // Vibration feedback
-          break;
-        case LivenessState.complete:
-          Vibration.vibrate(duration: 1000); // Stronger vibration on completion
-          break;
-        default:
-          break;
-      }
+  void _vibrateFeedback() async {
+    // First, check if the device has a vibrator and whether it's not null
+    final hasVibrator = await Vibration.hasVibrator();
+    if (hasVibrator != null && hasVibrator) {
+      Vibration.vibrate(duration: 500); // Vibrate for 500 milliseconds
     }
   }
 
@@ -135,11 +128,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
 
       await capturedFile.copy(imagePath);
 
-      setState(() {
-        _capturedImagePath = imagePath; // Update captured image path
-      });
-
       widget.onResult(LivenessResult(isSuccess: true, imagePath: imagePath));
+      Navigator.pop(context);
     } catch (e) {
       _handleError("Failed to capture photo");
     }
@@ -201,17 +191,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
               ),
             ),
           ),
-          if (_capturedImagePath != null)
-            Positioned(
-              top: 50,
-              right: 20,
-              child: Image.file(
-                File(_capturedImagePath!),
-                height: 100,
-                width: 100,
-                fit: BoxFit.cover,
-              ),
-            ),
         ],
       ),
     );
