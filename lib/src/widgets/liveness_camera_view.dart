@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data'; // Correct import for Uint8List
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -6,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
 import '../../liveness_sdk.dart';
+import 'package:image/image.dart' as img; // Import the image package
 
 class LivenessCameraView extends StatefulWidget {
   final Function(LivenessResult) onResult;
@@ -125,11 +127,22 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       // Clean up old files before saving new one
       await _cleanupOldFiles(appDir);
 
-      // Copy the new file
-      await capturedFile.copy(imagePath);
+      // Load the image as a raw file
+      final imageBytes = await capturedFile.readAsBytes();
+      final img.Image? image = img.decodeImage(Uint8List.fromList(imageBytes));
+
+      if (image == null) {
+        throw Exception("Failed to decode the image");
+      }
+
+      // Flip the image horizontally
+      final flippedImage = img.flipHorizontal(image);
+
+      // Save the flipped image to a new file
+      final newFile = File(imagePath)
+        ..writeAsBytesSync(img.encodeJpg(flippedImage));
 
       // Verify the new file exists and has content
-      final newFile = File(imagePath);
       if (!await newFile.exists()) {
         throw Exception('Failed to save captured image');
       }
