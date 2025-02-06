@@ -17,6 +17,7 @@ class LivenessDetector {
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
   bool _isFaceDetected = false;
+  LivenessState _lastCompletedState = LivenessState.initial;
 
   int _centeredFrames = 0;
   int _leftFrames = 0;
@@ -34,7 +35,7 @@ class LivenessDetector {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
-      minFaceSize: 0.15, // Reduced to detect faces more easily
+      minFaceSize: 0.15,
       performanceMode: FaceDetectorMode.accurate,
     );
     _faceDetector = FaceDetector(options: options);
@@ -51,8 +52,11 @@ class LivenessDetector {
       if (faces.isEmpty) {
         if (_isFaceDetected) {
           _isFaceDetected = false;
-          _resetProgress();
-          onStateChanged(LivenessState.initial, 0.0);
+          if (_currentState != LivenessState.initial) {
+            _currentState = _lastCompletedState;
+            onStateChanged(_currentState, _progress);
+          }
+          onStateChanged(LivenessState.initial, _progress);
         }
       } else {
         _isFaceDetected = true;
@@ -74,7 +78,7 @@ class LivenessDetector {
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: InputImageRotation.rotation270deg, // Adjusted for front camera
+      rotation: InputImageRotation.rotation270deg,
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
@@ -89,16 +93,12 @@ class LivenessDetector {
     _centeredFrames = 0;
     _leftFrames = 0;
     _rightFrames = 0;
-    _progress = 0.0;
     _currentState = LivenessState.initial;
+    // Keep the progress value for partial circle completion
   }
 
   Future<void> _updateFacePosition(Face face) async {
     final double? eulerY = face.headEulerAngleY;
-
-    // Debug print for face angles
-    print(
-        'Face angles - Y: ${face.headEulerAngleY}, Z: ${face.headEulerAngleZ}');
 
     switch (_currentState) {
       case LivenessState.initial:
@@ -106,6 +106,7 @@ class LivenessDetector {
           _centeredFrames++;
           if (_centeredFrames >= config.requiredFrames) {
             _updateState(LivenessState.lookingStraight);
+            _lastCompletedState = LivenessState.lookingStraight;
           }
         } else {
           _centeredFrames = 0;
@@ -113,21 +114,12 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingStraight:
-        if (eulerY != null && eulerY < -config.turnThreshold) {
-          _leftFrames++;
-          if (_leftFrames >= config.requiredFrames) {
-            _updateState(LivenessState.lookingLeft);
-          }
-        } else {
-          _leftFrames = 0;
-        }
-        break;
-
-      case LivenessState.lookingLeft:
+        // Changed direction: now check for right turn first
         if (eulerY != null && eulerY > config.turnThreshold) {
           _rightFrames++;
           if (_rightFrames >= config.requiredFrames) {
             _updateState(LivenessState.lookingRight);
+            _lastCompletedState = LivenessState.lookingRight;
           }
         } else {
           _rightFrames = 0;
@@ -135,8 +127,22 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
+        // Changed direction: now check for left turn
+        if (eulerY != null && eulerY < -config.turnThreshold) {
+          _leftFrames++;
+          if (_leftFrames >= config.requiredFrames) {
+            _updateState(LivenessState.lookingLeft);
+            _lastCompletedState = LivenessState.lookingLeft;
+          }
+        } else {
+          _leftFrames = 0;
+        }
+        break;
+
+      case LivenessState.lookingLeft:
         if (_isFaceCentered(face)) {
           _updateState(LivenessState.complete);
+          _lastCompletedState = LivenessState.complete;
         }
         break;
 
@@ -159,8 +165,8 @@ class LivenessDetector {
     _progress = switch (_currentState) {
       LivenessState.initial => 0.0,
       LivenessState.lookingStraight => 0.25,
-      LivenessState.lookingLeft => 0.5,
-      LivenessState.lookingRight => 0.75,
+      LivenessState.lookingRight => 0.5,
+      LivenessState.lookingLeft => 0.75,
       LivenessState.complete => 1.0,
     };
 
