@@ -40,7 +40,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
     _initializeCamera();
   }
 
-  // Updated callback to match LivenessDetector's signature
   void _handleStateChanged(
       LivenessState state, double progress, String message) {
     setState(() {
@@ -118,14 +117,49 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       final XFile photo = await _controller!.takePicture();
       final File capturedFile = File(photo.path);
       final Directory appDir = await getApplicationDocumentsDirectory();
-      final String imagePath = '${appDir.path}/liveness_capture.jpg';
 
+      // Generate timestamp for unique filename
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final String imagePath = '${appDir.path}/liveness_capture_$timestamp.jpg';
+
+      // Clean up old files before saving new one
+      await _cleanupOldFiles(appDir);
+
+      // Copy the new file
       await capturedFile.copy(imagePath);
+
+      // Verify the new file exists and has content
+      final newFile = File(imagePath);
+      if (!await newFile.exists()) {
+        throw Exception('Failed to save captured image');
+      }
 
       widget.onResult(LivenessResult(isSuccess: true, imagePath: imagePath));
       Navigator.pop(context);
     } catch (e) {
+      print('Error in _capturePhoto: $e');
       _handleError("Failed to capture photo");
+    }
+  }
+
+  Future<void> _cleanupOldFiles(Directory appDir) async {
+    try {
+      final files = appDir.listSync().whereType<File>().where(
+            (file) => file.path.contains('liveness_capture_'),
+          );
+
+      // Keep only the 5 most recent files
+      if (files.length > 5) {
+        final sortedFiles = files.toList()
+          ..sort(
+              (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+
+        for (var file in sortedFiles.skip(5)) {
+          await file.delete();
+        }
+      }
+    } catch (e) {
+      print('Error cleaning up old files: $e');
     }
   }
 
