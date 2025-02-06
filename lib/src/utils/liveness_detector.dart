@@ -17,10 +17,11 @@ class LivenessDetector {
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
+  bool _isFaceDetected = false;
   Timer? _faceDetectionTimer;
   double _progress = 0.0;
+
   int _requiredFramesCount = 0;
-  Rect? _faceFrame;
 
   LivenessDetector({
     required this.config,
@@ -40,24 +41,33 @@ class LivenessDetector {
   }
 
   Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
+    // Get the width and height of the image
     final width = image.width;
     final height = image.height;
+
+    // Get the raw plane data
     final planes = image.planes;
+
+    // Create a WriteBuffer to store all bytes
     final WriteBuffer allBytes = WriteBuffer();
 
+    // Write all planes to the buffer
     for (var plane in planes) {
       allBytes.putUint8List(plane.bytes);
     }
 
+    // Get the consolidated bytes
     final bytes = allBytes.done().buffer.asUint8List();
 
+    // Create the InputImageData
     final metadata = InputImageMetadata(
       size: Size(width.toDouble(), height.toDouble()),
-      rotation: InputImageRotation.rotation270deg,
-      format: InputImageFormat.bgra8888,
+      rotation: InputImageRotation.rotation270deg, // For front camera
+      format: InputImageFormat.bgra8888, // Most common format for Android/iOS
       bytesPerRow: image.planes[0].bytesPerRow,
     );
 
+    // Create and return the InputImage
     return InputImage.fromBytes(
       bytes: bytes,
       metadata: metadata,
@@ -73,18 +83,20 @@ class LivenessDetector {
       final faces = await _faceDetector.processImage(inputImage);
 
       if (faces.isEmpty) {
-        _handleNoFace();
+        if (_isFaceDetected) {
+          _isFaceDetected = false;
+          _resetProgress();
+          onStateChanged(LivenessState.initial, _progress);
+          _faceDetectionTimer?.cancel();
+        }
       } else {
-        final validFaces = faces.where((face) => _isFaceInFrame(face)).toList();
-        if (validFaces.isNotEmpty) {
-          final largestFace = validFaces.reduce((a, b) =>
-              a.boundingBox.width * a.boundingBox.height >
-                      b.boundingBox.width * b.boundingBox.height
-                  ? a
-                  : b);
-          await _updateFacePosition(largestFace);
-        } else {
-          _handleNoFace();
+        if (!_isFaceDetected) {
+          _isFaceDetected = true;
+          _currentState = LivenessState.initial;
+          _startFaceDetectionTimer();
+        }
+        for (var face in faces) {
+          await _updateFacePosition(face);
         }
       }
     } catch (e) {
@@ -94,10 +106,13 @@ class LivenessDetector {
     }
   }
 
-  void _handleNoFace() {
-    onStateChanged(LivenessState.initial, 0.0);
+  void _startFaceDetectionTimer() {
     _faceDetectionTimer?.cancel();
-    _resetProgress();
+    _faceDetectionTimer = Timer(const Duration(seconds: 1), () {
+      if (_isFaceDetected && _currentState == LivenessState.initial) {
+        _updateState(LivenessState.lookingStraight);
+      }
+    });
   }
 
   void _resetProgress() {
@@ -110,16 +125,15 @@ class LivenessDetector {
     final double? eulerY = face.headEulerAngleY;
     final double? adjustedEulerY = eulerY != null ? -eulerY : null;
 
-    if (!_isFaceCentered(face)) {
-      _requiredFramesCount = 0;
-      return;
-    }
-
     switch (_currentState) {
       case LivenessState.initial:
-        _requiredFramesCount++;
-        if (_requiredFramesCount >= 5) {
-          _updateState(LivenessState.lookingStraight);
+        if (_isFaceCentered(face)) {
+          _requiredFramesCount++;
+          if (_requiredFramesCount >= 5) {
+            _updateState(LivenessState.lookingStraight);
+          }
+        } else {
+          _requiredFramesCount = 0;
         }
         break;
 
@@ -146,9 +160,13 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
-        _requiredFramesCount++;
-        if (_requiredFramesCount >= 5) {
-          _updateState(LivenessState.complete);
+        if (_isFaceCentered(face)) {
+          _requiredFramesCount++;
+          if (_requiredFramesCount >= 5) {
+            _updateState(LivenessState.complete);
+          }
+        } else {
+          _requiredFramesCount = 0;
         }
         break;
 
@@ -165,14 +183,6 @@ class LivenessDetector {
         (eulerZ != null && eulerZ.abs() < config.straightThreshold);
   }
 
-  bool _isFaceInFrame(Face face) {
-    final faceRect = face.boundingBox;
-    return faceRect.center.dx >= _faceFrame!.left &&
-        faceRect.center.dx <= _faceFrame!.right &&
-        faceRect.center.dy >= _faceFrame!.top &&
-        faceRect.center.dy <= _faceFrame!.bottom;
-  }
-
   void _updateState(LivenessState newState) {
     _currentState = newState;
     _progress = switch (_currentState) {
@@ -184,12 +194,6 @@ class LivenessDetector {
     };
     _requiredFramesCount = 0;
     onStateChanged(_currentState, _progress);
-  }
-
-  void setFaceFrame(Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width * (config.circleSize / 2);
-    _faceFrame = Rect.fromCircle(center: center, radius: radius);
   }
 
   Future<void> dispose() async {
