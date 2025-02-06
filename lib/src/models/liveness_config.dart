@@ -6,6 +6,8 @@ class LivenessConfig {
   final Duration errorTimeout;
   final int maxConsecutiveErrors;
   final double circleSize;
+  final Function(bool)? onFaceDetected;
+  final Function(bool)? onMultipleFaces;
 
   const LivenessConfig({
     this.requiredFrames = 20,
@@ -15,5 +17,7 @@ class LivenessConfig {
     this.errorTimeout = const Duration(seconds: 1),
     this.maxConsecutiveErrors = 3,
     this.circleSize = 0.65,
+    this.onFaceDetected,
+    this.onMultipleFaces,
   });
 }
