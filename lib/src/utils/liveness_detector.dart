@@ -12,7 +12,7 @@ import '../../liveness_sdk.dart';
 
 class LivenessDetector {
   final LivenessConfig config;
-  final Function(LivenessState, double) onStateChanged;
+  final Function(LivenessState, double, String) onStateChanged;
 
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
@@ -21,8 +21,6 @@ class LivenessDetector {
   Timer? _faceDetectionTimer;
   double _progress = 0.0;
   int _requiredFramesCount = 0;
-
-  // New variables for multiple face detection
   bool _hasMultipleFaces = false;
   bool _isFaceInCircle = false;
 
@@ -68,21 +66,17 @@ class LivenessDetector {
   }
 
   bool _isFaceWithinCircle(Face face, Size imageSize) {
-    // Calculate circle center and radius based on image size
     final centerX = imageSize.width / 2;
     final centerY = imageSize.height / 2;
     final radius = imageSize.width * (config.circleSize / 2);
 
-    // Get face center point
     final faceCenterX = face.boundingBox.center.dx;
     final faceCenterY = face.boundingBox.center.dy;
 
-    // Calculate distance from face center to circle center
     final distance = sqrt(
       pow(faceCenterX - centerX, 2) + pow(faceCenterY - centerY, 2),
     );
 
-    // Check if face is within circle
     return distance <= radius;
   }
 
@@ -94,21 +88,22 @@ class LivenessDetector {
       final inputImage = await _convertCameraImageToInputImage(image);
       final faces = await _faceDetector.processImage(inputImage);
 
-      // Reset state for multiple face detection
-      _hasMultipleFaces = faces.length > 1;
-      _isFaceInCircle = false;
+      if (faces.length > 1) {
+        _hasMultipleFaces = true;
+        _resetProgress();
+        onStateChanged(_currentState, _progress, "Multiple faces detected");
+        return;
+      }
+
+      _hasMultipleFaces = false;
 
       if (faces.isEmpty) {
         if (_isFaceDetected) {
           _isFaceDetected = false;
           _resetProgress();
-          onStateChanged(LivenessState.initial, _progress);
-          _faceDetectionTimer?.cancel();
+          onStateChanged(
+              _currentState, _progress, "Position your face in the circle");
         }
-      } else if (_hasMultipleFaces) {
-        _resetProgress();
-        onStateChanged(LivenessState.initial, _progress);
-        _faceDetectionTimer?.cancel();
       } else {
         final face = faces.first;
         _isFaceInCircle = _isFaceWithinCircle(
@@ -116,21 +111,23 @@ class LivenessDetector {
           Size(image.width.toDouble(), image.height.toDouble()),
         );
 
-        if (_isFaceInCircle) {
-          if (!_isFaceDetected) {
-            _isFaceDetected = true;
-            _currentState = LivenessState.initial;
-            _startFaceDetectionTimer();
-          }
-          await _updateFacePosition(face);
-        } else {
+        if (!_isFaceInCircle) {
           if (_isFaceDetected) {
             _isFaceDetected = false;
             _resetProgress();
-            onStateChanged(LivenessState.initial, _progress);
-            _faceDetectionTimer?.cancel();
+            onStateChanged(
+                _currentState, _progress, "Keep your face within the circle");
           }
+          return;
         }
+
+        if (!_isFaceDetected) {
+          _isFaceDetected = true;
+          _currentState = LivenessState.initial;
+          _startFaceDetectionTimer();
+        }
+
+        await _updateFacePosition(face);
       }
     } catch (e) {
       print('Error processing image: $e');
@@ -139,26 +136,13 @@ class LivenessDetector {
     }
   }
 
-  void _startFaceDetectionTimer() {
-    _faceDetectionTimer?.cancel();
-    _faceDetectionTimer = Timer(const Duration(seconds: 1), () {
-      if (_isFaceDetected && _currentState == LivenessState.initial) {
-        _updateState(LivenessState.lookingStraight);
-      }
-    });
-  }
-
   void _resetProgress() {
     _requiredFramesCount = 0;
     _currentState = LivenessState.initial;
     _progress = 0.0;
-    _hasMultipleFaces = false;
-    _isFaceInCircle = false;
   }
 
   Future<void> _updateFacePosition(Face face) async {
-    if (!_isFaceInCircle) return;
-
     final double? eulerY = face.headEulerAngleY;
     final double? adjustedEulerY = eulerY != null ? -eulerY : null;
 
@@ -167,7 +151,8 @@ class LivenessDetector {
         if (_isFaceCentered(face)) {
           _requiredFramesCount++;
           if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.lookingStraight);
+            _updateState(LivenessState.lookingStraight,
+                "Perfect! Now slowly turn your head left");
           }
         } else {
           _requiredFramesCount = 0;
@@ -178,7 +163,8 @@ class LivenessDetector {
         if (adjustedEulerY != null && adjustedEulerY < -config.turnThreshold) {
           _requiredFramesCount++;
           if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.lookingLeft);
+            _updateState(LivenessState.lookingLeft,
+                "Perfect! Now slowly turn your head right");
           }
         } else {
           _requiredFramesCount = 0;
@@ -189,7 +175,8 @@ class LivenessDetector {
         if (adjustedEulerY != null && adjustedEulerY > config.turnThreshold) {
           _requiredFramesCount++;
           if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.lookingRight);
+            _updateState(
+                LivenessState.lookingRight, "Great! Now center your face");
           }
         } else {
           _requiredFramesCount = 0;
@@ -200,7 +187,7 @@ class LivenessDetector {
         if (_isFaceCentered(face)) {
           _requiredFramesCount++;
           if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.complete);
+            _updateState(LivenessState.complete, "Perfect! Processing...");
           }
         } else {
           _requiredFramesCount = 0;
@@ -220,7 +207,17 @@ class LivenessDetector {
         (eulerZ != null && eulerZ.abs() < config.straightThreshold);
   }
 
-  void _updateState(LivenessState newState) {
+  void _startFaceDetectionTimer() {
+    _faceDetectionTimer?.cancel();
+    _faceDetectionTimer = Timer(const Duration(seconds: 1), () {
+      if (_isFaceDetected && _currentState == LivenessState.initial) {
+        _updateState(LivenessState.lookingStraight,
+            "Perfect! Now slowly turn your head left");
+      }
+    });
+  }
+
+  void _updateState(LivenessState newState, String message) {
     _currentState = newState;
     _progress = switch (_currentState) {
       LivenessState.initial => 0.0,
@@ -230,7 +227,7 @@ class LivenessDetector {
       LivenessState.complete => 1.0,
     };
     _requiredFramesCount = 0;
-    onStateChanged(_currentState, _progress);
+    onStateChanged(_currentState, _progress, message);
   }
 
   Future<void> dispose() async {

@@ -40,6 +40,39 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
     _initializeCamera();
   }
 
+  // Updated callback to match LivenessDetector's signature
+  void _handleStateChanged(
+      LivenessState state, double progress, String message) {
+    setState(() {
+      _progress = progress;
+      _instruction = message;
+
+      switch (state) {
+        case LivenessState.initial:
+          _circleColor = Colors.white;
+          break;
+        case LivenessState.lookingStraight:
+          _circleColor = Colors.green;
+          _vibrateFeedback();
+          break;
+        case LivenessState.lookingLeft:
+          _circleColor = Colors.green;
+          _vibrateFeedback();
+          break;
+        case LivenessState.lookingRight:
+          _circleColor = Colors.green;
+          _vibrateFeedback();
+          break;
+        case LivenessState.complete:
+          _circleColor = Colors.green;
+          _isCompleted = true;
+          _vibrateFeedback();
+          _capturePhoto();
+          break;
+      }
+    });
+  }
+
   Future<void> _initializeCamera() async {
     final status = await Permission.camera.request();
     if (status != PermissionStatus.granted) {
@@ -68,41 +101,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
     } catch (e) {
       _handleError("Failed to initialize camera: $e");
     }
-  }
-
-  void _handleStateChanged(LivenessState state, double progress) {
-    setState(() {
-      _progress = progress;
-
-      switch (state) {
-        case LivenessState.initial:
-          _instruction = "Position your face in the circle";
-          _circleColor = Colors.white;
-          break;
-        case LivenessState.lookingStraight:
-          _instruction = "Perfect! Now slowly turn your head left";
-          _circleColor = Colors.green;
-          _vibrateFeedback();
-          break;
-        case LivenessState.lookingLeft:
-          _instruction = "Perfect! Now slowly turn your head right";
-          _circleColor = Colors.green;
-          _vibrateFeedback();
-          break;
-        case LivenessState.lookingRight:
-          _instruction = "Great! Now center your face";
-          _circleColor = Colors.green;
-          _vibrateFeedback();
-          break;
-        case LivenessState.complete:
-          _instruction = "Perfect! Processing...";
-          _circleColor = Colors.green;
-          _isCompleted = true;
-          _vibrateFeedback();
-          _capturePhoto();
-          break;
-      }
-    });
   }
 
   void _vibrateFeedback() async {
@@ -209,64 +207,34 @@ class FaceDetectionPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
-    // Draw the main circle
     final circlePaint = Paint()
-      ..color = circleColor
+      ..color = Colors.white
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0;
 
     canvas.drawCircle(center, radius, circlePaint);
 
-    // Draw progress arcs
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    const double startAngle = -pi / 2; // Start from top
-
-    // Background arcs (unfilled progress)
-    final backgroundPaint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0;
-
-    canvas.drawArc(rect, startAngle, 2 * pi, false, backgroundPaint);
-
-    // Progress arc
     if (progress > 0) {
+      final rect = Rect.fromCircle(center: center, radius: radius);
+      const double startAngle = -pi / 2;
+      final segmentAngle = pi / 2;
+
+      final completedSegments = (progress * 4).floor();
+
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0;
 
-      canvas.drawArc(
-        rect,
-        startAngle,
-        2 * pi * progress,
-        false,
-        progressPaint,
-      );
-    }
-
-    // Draw guide text if no progress
-    if (progress == 0) {
-      const textStyle = TextStyle(
-        color: Colors.white,
-        fontSize: 14,
-      );
-      final textSpan = TextSpan(
-        text: 'Position face here',
-        style: textStyle,
-      );
-      final textPainter = TextPainter(
-        text: textSpan,
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(
-          center.dx - textPainter.width / 2,
-          center.dy - radius - textPainter.height - 10,
-        ),
-      );
+      for (var i = 0; i < completedSegments; i++) {
+        canvas.drawArc(
+          rect,
+          startAngle + (i * segmentAngle),
+          segmentAngle,
+          false,
+          progressPaint,
+        );
+      }
     }
   }
 
