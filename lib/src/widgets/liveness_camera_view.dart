@@ -81,38 +81,34 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
           break;
         case LivenessState.lookingStraight:
           _instruction = "Perfect! Now slowly turn your head left";
-          _circleColor = Colors.white;
+          _circleColor = Colors.green;
           _vibrateFeedback();
           break;
         case LivenessState.lookingLeft:
           _instruction = "Perfect! Now slowly turn your head right";
-          _circleColor = Colors.white;
+          _circleColor = Colors.green;
           _vibrateFeedback();
           break;
         case LivenessState.lookingRight:
           _instruction = "Great! Now center your face";
-          _circleColor = Colors.white;
+          _circleColor = Colors.green;
           _vibrateFeedback();
           break;
         case LivenessState.complete:
           _instruction = "Perfect! Processing...";
-          _circleColor = Colors.white;
+          _circleColor = Colors.green;
           _isCompleted = true;
           _vibrateFeedback();
           _capturePhoto();
-          break;
-        default:
-          _circleColor = Colors.red;
           break;
       }
     });
   }
 
   void _vibrateFeedback() async {
-    // First, check if the device has a vibrator and whether it's not null
     final hasVibrator = await Vibration.hasVibrator();
     if (hasVibrator != null && hasVibrator) {
-      Vibration.vibrate(duration: 500); // Vibrate for 500 milliseconds
+      Vibration.vibrate(duration: 250);
     }
   }
 
@@ -212,6 +208,8 @@ class FaceDetectionPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
+
+    // Draw the main circle
     final circlePaint = Paint()
       ..color = circleColor
       ..style = PaintingStyle.stroke
@@ -219,20 +217,55 @@ class FaceDetectionPainter extends CustomPainter {
 
     canvas.drawCircle(center, radius, circlePaint);
 
-    final activeQuarter = (progress * 4).floor();
-    for (var i = 0; i < 4; i++) {
-      final startAngle = -pi / 2 + (i * pi / 2);
-      final paint = Paint()
+    // Draw progress arcs
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    const double startAngle = -pi / 2; // Start from top
+
+    // Background arcs (unfilled progress)
+    final backgroundPaint = Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+
+    canvas.drawArc(rect, startAngle, 2 * pi, false, backgroundPaint);
+
+    // Progress arc
+    if (progress > 0) {
+      final progressPaint = Paint()
+        ..color = Colors.green
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0
-        ..color = i < activeQuarter ? Colors.green : Colors.white;
+        ..strokeWidth = 3.0;
 
       canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
+        rect,
         startAngle,
-        pi / 2,
+        2 * pi * progress,
         false,
-        paint,
+        progressPaint,
+      );
+    }
+
+    // Draw guide text if no progress
+    if (progress == 0) {
+      const textStyle = TextStyle(
+        color: Colors.white,
+        fontSize: 14,
+      );
+      final textSpan = TextSpan(
+        text: 'Position face here',
+        style: textStyle,
+      );
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(
+          center.dx - textPainter.width / 2,
+          center.dy - radius - textPainter.height - 10,
+        ),
       );
     }
   }
@@ -240,5 +273,6 @@ class FaceDetectionPainter extends CustomPainter {
   @override
   bool shouldRepaint(FaceDetectionPainter oldDelegate) =>
       progress != oldDelegate.progress ||
-      circleColor != oldDelegate.circleColor;
+      circleColor != oldDelegate.circleColor ||
+      circleSize != oldDelegate.circleSize;
 }

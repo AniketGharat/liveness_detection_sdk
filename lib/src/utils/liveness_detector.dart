@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
@@ -19,8 +20,11 @@ class LivenessDetector {
   bool _isFaceDetected = false;
   Timer? _faceDetectionTimer;
   double _progress = 0.0;
-
   int _requiredFramesCount = 0;
+
+  // New variables for multiple face detection
+  bool _hasMultipleFaces = false;
+  bool _isFaceInCircle = false;
 
   LivenessDetector({
     required this.config,
@@ -63,6 +67,25 @@ class LivenessDetector {
     );
   }
 
+  bool _isFaceWithinCircle(Face face, Size imageSize) {
+    // Calculate circle center and radius based on image size
+    final centerX = imageSize.width / 2;
+    final centerY = imageSize.height / 2;
+    final radius = imageSize.width * (config.circleSize / 2);
+
+    // Get face center point
+    final faceCenterX = face.boundingBox.center.dx;
+    final faceCenterY = face.boundingBox.center.dy;
+
+    // Calculate distance from face center to circle center
+    final distance = sqrt(
+      pow(faceCenterX - centerX, 2) + pow(faceCenterY - centerY, 2),
+    );
+
+    // Check if face is within circle
+    return distance <= radius;
+  }
+
   Future<void> processImage(CameraImage image) async {
     if (_isProcessing) return;
     _isProcessing = true;
@@ -71,6 +94,10 @@ class LivenessDetector {
       final inputImage = await _convertCameraImageToInputImage(image);
       final faces = await _faceDetector.processImage(inputImage);
 
+      // Reset state for multiple face detection
+      _hasMultipleFaces = faces.length > 1;
+      _isFaceInCircle = false;
+
       if (faces.isEmpty) {
         if (_isFaceDetected) {
           _isFaceDetected = false;
@@ -78,14 +105,31 @@ class LivenessDetector {
           onStateChanged(LivenessState.initial, _progress);
           _faceDetectionTimer?.cancel();
         }
+      } else if (_hasMultipleFaces) {
+        _resetProgress();
+        onStateChanged(LivenessState.initial, _progress);
+        _faceDetectionTimer?.cancel();
       } else {
-        if (!_isFaceDetected) {
-          _isFaceDetected = true;
-          _currentState = LivenessState.initial;
-          _startFaceDetectionTimer();
-        }
-        for (var face in faces) {
+        final face = faces.first;
+        _isFaceInCircle = _isFaceWithinCircle(
+          face,
+          Size(image.width.toDouble(), image.height.toDouble()),
+        );
+
+        if (_isFaceInCircle) {
+          if (!_isFaceDetected) {
+            _isFaceDetected = true;
+            _currentState = LivenessState.initial;
+            _startFaceDetectionTimer();
+          }
           await _updateFacePosition(face);
+        } else {
+          if (_isFaceDetected) {
+            _isFaceDetected = false;
+            _resetProgress();
+            onStateChanged(LivenessState.initial, _progress);
+            _faceDetectionTimer?.cancel();
+          }
         }
       }
     } catch (e) {
@@ -108,9 +152,13 @@ class LivenessDetector {
     _requiredFramesCount = 0;
     _currentState = LivenessState.initial;
     _progress = 0.0;
+    _hasMultipleFaces = false;
+    _isFaceInCircle = false;
   }
 
   Future<void> _updateFacePosition(Face face) async {
+    if (!_isFaceInCircle) return;
+
     final double? eulerY = face.headEulerAngleY;
     final double? adjustedEulerY = eulerY != null ? -eulerY : null;
 
@@ -118,7 +166,7 @@ class LivenessDetector {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
           _requiredFramesCount++;
-          if (_requiredFramesCount >= 5) {
+          if (_requiredFramesCount >= config.requiredFrames) {
             _updateState(LivenessState.lookingStraight);
           }
         } else {
@@ -129,7 +177,7 @@ class LivenessDetector {
       case LivenessState.lookingStraight:
         if (adjustedEulerY != null && adjustedEulerY < -config.turnThreshold) {
           _requiredFramesCount++;
-          if (_requiredFramesCount >= 5) {
+          if (_requiredFramesCount >= config.requiredFrames) {
             _updateState(LivenessState.lookingLeft);
           }
         } else {
@@ -140,7 +188,7 @@ class LivenessDetector {
       case LivenessState.lookingLeft:
         if (adjustedEulerY != null && adjustedEulerY > config.turnThreshold) {
           _requiredFramesCount++;
-          if (_requiredFramesCount >= 5) {
+          if (_requiredFramesCount >= config.requiredFrames) {
             _updateState(LivenessState.lookingRight);
           }
         } else {
@@ -151,7 +199,7 @@ class LivenessDetector {
       case LivenessState.lookingRight:
         if (_isFaceCentered(face)) {
           _requiredFramesCount++;
-          if (_requiredFramesCount >= 5) {
+          if (_requiredFramesCount >= config.requiredFrames) {
             _updateState(LivenessState.complete);
           }
         } else {
