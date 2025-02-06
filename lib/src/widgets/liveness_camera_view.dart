@@ -1,11 +1,9 @@
-// liveness_camera_view.dart
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:vibration/vibration.dart';
 import 'package:image/image.dart' as img;
 
 import '../../liveness_sdk.dart';
