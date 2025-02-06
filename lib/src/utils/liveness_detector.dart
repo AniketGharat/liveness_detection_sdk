@@ -19,7 +19,6 @@ class LivenessDetector {
   bool _isFaceDetected = false;
   Timer? _faceDetectionTimer;
   double _progress = 0.0;
-
   int _requiredFramesCount = 0;
 
   LivenessDetector({
@@ -40,37 +39,24 @@ class LivenessDetector {
   }
 
   Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
-    // Get the width and height of the image
     final width = image.width;
     final height = image.height;
-
-    // Get the raw plane data
     final planes = image.planes;
-
-    // Create a WriteBuffer to store all bytes
     final WriteBuffer allBytes = WriteBuffer();
 
-    // Write all planes to the buffer
     for (var plane in planes) {
       allBytes.putUint8List(plane.bytes);
     }
 
-    // Get the consolidated bytes
     final bytes = allBytes.done().buffer.asUint8List();
-
-    // Create the InputImageData
     final metadata = InputImageMetadata(
       size: Size(width.toDouble(), height.toDouble()),
-      rotation: InputImageRotation.rotation270deg, // For front camera
-      format: InputImageFormat.bgra8888, // Most common format for Android/iOS
+      rotation: InputImageRotation.rotation270deg,
+      format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
 
-    // Create and return the InputImage
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: metadata,
-    );
+    return InputImage.fromBytes(bytes: bytes, metadata: metadata);
   }
 
   Future<void> processImage(CameraImage image) async {
@@ -86,7 +72,6 @@ class LivenessDetector {
           _isFaceDetected = false;
           _resetProgress();
           onStateChanged(LivenessState.initial, _progress);
-          _faceDetectionTimer?.cancel();
         }
       } else {
         if (!_isFaceDetected) {
@@ -122,7 +107,7 @@ class LivenessDetector {
 
   Future<void> _updateFacePosition(Face face) async {
     final double? eulerY = face.headEulerAngleY;
-    final double? adjustedEulerY = eulerY != null ? -eulerY : null;
+    final double? eulerZ = face.headEulerAngleZ;
 
     switch (_currentState) {
       case LivenessState.initial:
@@ -137,7 +122,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingStraight:
-        if (adjustedEulerY != null && adjustedEulerY < -config.turnThreshold) {
+        if (eulerY != null && eulerY < -config.turnThreshold) {
           _requiredFramesCount++;
           if (_requiredFramesCount >= 5) {
             _updateState(LivenessState.lookingLeft);
@@ -148,7 +133,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (adjustedEulerY != null && adjustedEulerY > config.turnThreshold) {
+        if (eulerY != null && eulerY > config.turnThreshold) {
           _requiredFramesCount++;
           if (_requiredFramesCount >= 5) {
             _updateState(LivenessState.lookingRight);
@@ -178,8 +163,23 @@ class LivenessDetector {
     final double? eulerY = face.headEulerAngleY;
     final double? eulerZ = face.headEulerAngleZ;
 
-    return (eulerY != null && eulerY.abs() < config.straightThreshold) &&
-        (eulerZ != null && eulerZ.abs() < config.straightThreshold);
+    final double facePositionThreshold = 0.5; // 50% threshold for the circle
+
+    if (eulerY != null && eulerZ != null) {
+      final isInCenter = eulerY.abs() < config.straightThreshold &&
+          eulerZ.abs() < config.straightThreshold;
+      final isOutOfBounds = eulerY.abs() > facePositionThreshold ||
+          eulerZ.abs() > facePositionThreshold;
+
+      if (isOutOfBounds) {
+        // Trigger instruction for centering head
+        onStateChanged(LivenessState.initial, _progress);
+        return false;
+      }
+
+      return isInCenter;
+    }
+    return false;
   }
 
   void _updateState(LivenessState newState) {

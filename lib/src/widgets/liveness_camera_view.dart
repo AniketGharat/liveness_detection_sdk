@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:vibration/vibration.dart';
+import 'package:vibration/vibration.dart'; // Added for vibration feedback
 import '../../liveness_sdk.dart';
 
 class LivenessCameraView extends StatefulWidget {
@@ -27,8 +27,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
   String _instruction = "Position your face in the circle";
   Color _circleColor = Colors.white;
   double _progress = 0.0;
-  bool _isFaceDetected = false;
   bool _isCompleted = false;
+
+  String? _capturedImagePath;
 
   @override
   void initState() {
@@ -73,7 +74,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
   void _handleStateChanged(LivenessState state, double progress) {
     setState(() {
       _progress = progress;
-
       switch (state) {
         case LivenessState.initial:
           _instruction = "Position your face in the circle";
@@ -101,7 +101,26 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
           _circleColor = Colors.red;
           break;
       }
+      _vibrateFeedback(state); // Added vibration feedback
     });
+  }
+
+  // Trigger vibration feedback for each step
+  void _vibrateFeedback(LivenessState state) {
+    if (Vibration.hasVibrator() == true) {
+      switch (state) {
+        case LivenessState.lookingStraight:
+        case LivenessState.lookingLeft:
+        case LivenessState.lookingRight:
+          Vibration.vibrate(duration: 500); // Vibration feedback
+          break;
+        case LivenessState.complete:
+          Vibration.vibrate(duration: 1000); // Stronger vibration on completion
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   Future<void> _capturePhoto() async {
@@ -116,8 +135,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
 
       await capturedFile.copy(imagePath);
 
+      setState(() {
+        _capturedImagePath = imagePath; // Update captured image path
+      });
+
       widget.onResult(LivenessResult(isSuccess: true, imagePath: imagePath));
-      Navigator.pop(context);
     } catch (e) {
       _handleError("Failed to capture photo");
     }
@@ -179,6 +201,17 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
               ),
             ),
           ),
+          if (_capturedImagePath != null)
+            Positioned(
+              top: 50,
+              right: 20,
+              child: Image.file(
+                File(_capturedImagePath!),
+                height: 100,
+                width: 100,
+                fit: BoxFit.cover,
+              ),
+            ),
         ],
       ),
     );
