@@ -1,8 +1,8 @@
+// liveness_camera_view.dart
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
@@ -28,209 +28,116 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     with SingleTickerProviderStateMixin {
   CameraController? _controller;
   late final LivenessDetector _livenessDetector;
-  late final AnimationController _progressController;
-
   String _instruction = "Position your face in the circle";
   Color _circleColor = Colors.transparent;
   double _progress = 0.0;
   bool _isCompleted = false;
-  bool _isFaceDetected = false;
-  bool _hasMultipleFaces = false;
+  bool _hasFace = false;
 
   @override
   void initState() {
     super.initState();
-    _progressController = AnimationController(
-      vsync: this,
-      duration: widget.config.phaseDuration,
-    );
-
-    // Create a new LivenessConfig with the callbacks
-    final configWithCallbacks = LivenessConfig(
-      requiredFrames: widget.config.requiredFrames,
-      phaseDuration: widget.config.phaseDuration,
-      straightThreshold: widget.config.straightThreshold,
-      turnThreshold: widget.config.turnThreshold,
-      errorTimeout: widget.config.errorTimeout,
-      maxConsecutiveErrors: widget.config.maxConsecutiveErrors,
-      circleSize: widget.config.circleSize,
-      onFaceDetected: _handleFaceDetection,
-      onMultipleFaces: _handleMultipleFaces,
-    );
-
     _livenessDetector = LivenessDetector(
-      config: configWithCallbacks,
+      config: widget.config,
       onStateChanged: _handleStateChanged,
     );
-
     _initializeCamera();
   }
 
   Future<void> _initializeCamera() async {
-    // Request camera permission
     final status = await Permission.camera.request();
     if (status != PermissionStatus.granted) {
-      _handleError("Camera permission denied");
+      _handleError("Camera permission required");
       return;
     }
 
+    final cameras = await availableCameras();
+    final frontCamera = cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.front,
+    );
+
+    _controller = CameraController(
+      frontCamera,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
     try {
-      // Get available cameras
-      final cameras = await availableCameras();
-
-      // Find front camera
-      final frontCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
-
-      // Initialize the controller
-      _controller = CameraController(
-        frontCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-      );
-
-      // Initialize the camera
       await _controller!.initialize();
-
-      if (!mounted) return;
-
-      // Start image stream
-      await _controller!.startImageStream((image) {
-        if (!_isCompleted) {
-          _livenessDetector.processImage(image);
-        }
-      });
-
-      // Set portrait orientation
-      await _controller!.lockCaptureOrientation(DeviceOrientation.portraitUp);
-
       if (mounted) {
-        setState(() {});
+        _livenessDetector.setFaceFrame(_controller!.value.previewSize!);
+        await _controller!.startImageStream(_livenessDetector.processImage);
       }
     } catch (e) {
-      print('Error initializing camera: $e');
-      _handleError("Failed to initialize camera");
-    }
-  }
-
-  void _handleFaceDetection(bool detected) {
-    if (mounted) {
-      setState(() {
-        _isFaceDetected = detected;
-        _circleColor = detected ? Colors.green : Colors.transparent;
-        if (!detected) {
-          _instruction = "Position your face in the circle";
-        }
-      });
-    }
-  }
-
-  void _handleMultipleFaces(bool hasMultiple) {
-    if (mounted) {
-      setState(() {
-        _hasMultipleFaces = hasMultiple;
-        if (hasMultiple) {
-          _instruction = "Multiple faces detected";
-          _circleColor = Colors.red;
-        }
-      });
+      _handleError("Failed to initialize camera: $e");
     }
   }
 
   void _handleStateChanged(LivenessState state, double progress) {
-    if (!mounted) return;
-
     setState(() {
       _progress = progress;
-
-      if (_hasMultipleFaces) {
-        _instruction = "Multiple faces detected";
-        _circleColor = Colors.red;
-        return;
-      }
-
-      if (!_isFaceDetected) {
-        _instruction = "Position your face in the circle";
-        _circleColor = Colors.transparent;
-        return;
-      }
+      _hasFace = state != LivenessState.initial;
 
       switch (state) {
         case LivenessState.initial:
+          _circleColor = Colors.transparent;
           _instruction = "Position your face in the circle";
-          _circleColor = Colors.green;
           break;
         case LivenessState.lookingStraight:
-          _instruction = "Perfect! Now slowly turn your head left";
           _circleColor = Colors.green;
-          Vibration.vibrate(duration: 100);
+          _instruction = "Perfect! Now slowly turn your head left";
+          _vibrate();
           break;
         case LivenessState.lookingLeft:
-          _instruction = "Perfect! Now slowly turn your head right";
           _circleColor = Colors.green;
-          Vibration.vibrate(duration: 100);
+          _instruction = "Perfect! Now slowly turn your head right";
+          _vibrate();
           break;
         case LivenessState.lookingRight:
-          _instruction = "Great! Now center your face";
           _circleColor = Colors.green;
-          Vibration.vibrate(duration: 100);
+          _instruction = "Great! Now center your face";
+          _vibrate();
           break;
         case LivenessState.complete:
-          _instruction = "Perfect! Processing...";
           _circleColor = Colors.green;
+          _instruction = "Perfect! Processing...";
           _isCompleted = true;
-          Vibration.vibrate(duration: 100);
+          _vibrate();
           _capturePhoto();
           break;
       }
     });
   }
 
+  void _vibrate() => Vibration.vibrate(duration: 100);
+
   Future<void> _capturePhoto() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
-      await _controller!.stopImageStream();
       final XFile photo = await _controller!.takePicture();
-
+      final File originalFile = File(photo.path);
       final Directory appDir = await getApplicationDocumentsDirectory();
-      final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-      final String imagePath = '${appDir.path}/liveness_capture_$timestamp.jpg';
+      final String fileName =
+          'liveness_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String imagePath = '${appDir.path}/$fileName';
 
-      // Read and process the image
-      final bytes = await File(photo.path).readAsBytes();
+      final bytes = await originalFile.readAsBytes();
       var image = img.decodeImage(bytes);
 
       if (image != null) {
-        // Rotate and flip the image for correct orientation
         image = img.copyRotate(image, angle: 90);
-        image =
-            img.flipHorizontal(image); // Flip for front camera mirror effect
-
-        // Save the processed image
-        final processedBytes = img.encodeJpg(image);
-        await File(imagePath).writeAsBytes(processedBytes);
-
-        // Delete the old file if it exists
-        final oldFile = File(photo.path);
-        if (await oldFile.exists()) {
-          await oldFile.delete();
-        }
+        image = img.copyFlip(image, direction: img.FlipDirection.horizontal);
+        await File(imagePath).writeAsBytes(img.encodeJpg(image));
 
         widget.onResult(LivenessResult(
           isSuccess: true,
           imagePath: imagePath,
         ));
-      } else {
-        throw Exception('Failed to process image');
       }
 
-      Navigator.pop(context);
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      print('Error capturing photo: $e');
       _handleError("Failed to capture photo");
     }
   }
@@ -240,12 +147,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       isSuccess: false,
       errorMessage: message,
     ));
-    Navigator.pop(context);
+    if (mounted) Navigator.pop(context);
   }
 
   @override
   void dispose() {
-    _progressController.dispose();
     _controller?.dispose();
     _livenessDetector.dispose();
     super.dispose();
@@ -253,157 +159,100 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
 
   @override
   Widget build(BuildContext context) {
-    if (_controller == null || !_controller!.value.isInitialized) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(
-            color: Colors.white,
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: _controller?.value.isInitialized == true
+          ? Stack(
+              fit: StackFit.expand,
+              children: [
+                CameraPreview(_controller!),
+                CustomPaint(
+                  painter: FaceDetectionPainter(
+                    progress: _progress,
+                    circleColor: _circleColor,
+                    circleSize: widget.config.circleSize,
+                    hasFace: _hasFace,
+                  ),
+                ),
+                _buildInstructionOverlay(),
+              ],
+            )
+          : const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+  }
+
+  Widget _buildInstructionOverlay() => Positioned(
+        bottom: 50,
+        left: 20,
+        right: 20,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            _instruction,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+            textAlign: TextAlign.center,
           ),
         ),
       );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Transform.scale(
-            scale: 1.0,
-            child: Center(
-              child: CameraPreview(_controller!),
-            ),
-          ),
-          CustomPaint(
-            painter: FaceDetectionPainter(
-              progress: _progress,
-              circleColor: _circleColor,
-              circleSize: widget.config.circleSize,
-            ),
-          ),
-          Positioned(
-            bottom: 50,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 16,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _instruction,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class FaceDetectionPainter extends CustomPainter {
   final double progress;
   final Color circleColor;
   final double circleSize;
+  final bool hasFace;
 
   FaceDetectionPainter({
     required this.progress,
     required this.circleColor,
     required this.circleSize,
+    required this.hasFace,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (!hasFace) return;
+
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
+    final Paint paint = Paint()
+      ..color = circleColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
 
-    if (circleColor != Colors.transparent) {
-      // Draw guide frame
-      final framePaint = Paint()
-        ..color = circleColor.withOpacity(0.3)
+    // Draw main circle
+    canvas.drawCircle(center, radius, paint);
+
+    // Draw progress arcs
+    final activeQuarter = (progress * 4).floor();
+    for (int i = 0; i < 4; i++) {
+      final startAngle = -pi / 2 + (i * pi / 2);
+      final arcPaint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
+        ..strokeWidth = 3.0
+        ..color = i <= activeQuarter ? Colors.green : Colors.transparent;
 
-      final frameRect = RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: center,
-          width: size.width * 0.8,
-          height: size.height * 0.8,
-        ),
-        const Radius.circular(12),
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        pi / 2,
+        false,
+        arcPaint,
       );
-      canvas.drawRRect(frameRect, framePaint);
-
-      // Draw the circle
-      final circlePaint = Paint()
-        ..color = circleColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0;
-
-      canvas.drawCircle(center, radius, circlePaint);
-
-      // Draw progress arcs only if there's progress
-      if (progress > 0) {
-        final progressPaint = Paint()
-          ..color = Colors.green
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.0;
-
-        // Calculate which quarter is active
-        final activeQuarter = (progress * 4).floor();
-
-        // Draw each quarter
-        for (var i = 0; i < 4; i++) {
-          final startAngle = -pi / 2 + (i * pi / 2);
-          final paint = Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 3.0;
-
-          if (i < activeQuarter) {
-            // Completed quarters in green
-            paint.color = Colors.green;
-          } else if (i == activeQuarter) {
-            // Current quarter in green with progress
-            paint.color = Colors.green;
-            final quarterProgress = (progress * 4) - activeQuarter;
-            canvas.drawArc(
-              Rect.fromCircle(center: center, radius: radius),
-              startAngle,
-              (pi / 2) * quarterProgress,
-              false,
-              paint,
-            );
-            continue;
-          } else {
-            // Future quarters in white with reduced opacity
-            paint.color = Colors.white.withOpacity(0.3);
-          }
-
-          canvas.drawArc(
-            Rect.fromCircle(center: center, radius: radius),
-            startAngle,
-            pi / 2,
-            false,
-            paint,
-          );
-        }
-      }
     }
   }
 
   @override
   bool shouldRepaint(FaceDetectionPainter oldDelegate) =>
       progress != oldDelegate.progress ||
-      circleColor != oldDelegate.circleColor;
+      circleColor != oldDelegate.circleColor ||
+      hasFace != oldDelegate.hasFace;
 }
