@@ -223,7 +223,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
           if (!_isFaceDetected)
             Center(
               child: Lottie.asset(
-                'assets/animations/face_scan.json',
+                'animations/face_scan.json',
                 width: 200,
                 height: 200,
               ),
@@ -231,7 +231,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
           if (_hasMultipleFaces)
             Center(
               child: Lottie.asset(
-                'assets/animations/multiple_faces.json',
+                'animations/multiple_faces.json',
                 width: 200,
                 height: 200,
               ),
