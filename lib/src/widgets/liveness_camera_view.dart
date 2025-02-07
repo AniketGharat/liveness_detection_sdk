@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:liveness_detection_sdk/src/widgets/animated_message.dart';
@@ -9,7 +8,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
 import 'package:lottie/lottie.dart';
 import 'package:image/image.dart' as img;
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 import '../../liveness_sdk.dart';
 
@@ -39,22 +37,21 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   late AnimationController _faceAnimationController;
   late AnimationController _overlayAnimationController;
 
-  final Map<LivenessState, String> _animationAssets = {
-    LivenessState.initial: 'assets/animations/face_scan.json',
-    LivenessState.lookingStraight: 'assets/animations/look_straight.json',
-    LivenessState.lookingLeft: 'assets/animations/look_left.json',
-    LivenessState.lookingRight: 'assets/animations/look_right.json',
-    LivenessState.multipleFaces: 'assets/animations/multiple_faces.json',
-  };
+  // Animation controllers for each state
+  late AnimationController _initialAnimationController;
+  late AnimationController _lookLeftAnimationController;
+  late AnimationController _lookRightAnimationController;
+  late AnimationController _lookStraightAnimationController;
+  late AnimationController _processingAnimationController;
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
+    _initializeAnimationControllers();
     _initializeCamera();
   }
 
-  void _initializeAnimations() {
+  void _initializeAnimationControllers() {
     _faceAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -63,7 +60,33 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     _overlayAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
-    )..repeat(reverse: true);
+    );
+
+    // Initialize state-specific animation controllers
+    _initialAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+
+    _lookLeftAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+
+    _lookRightAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+
+    _lookStraightAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+
+    _processingAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
   }
 
   Future<void> _initializeCamera() async {
@@ -114,6 +137,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       LivenessState state, double progress, String message) async {
     if (!mounted) return;
 
+    // Stop all animation controllers
+    _stopAllAnimations();
+
     setState(() {
       _currentState = state;
       _instruction = message;
@@ -122,16 +148,91 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _hasMultipleFaces = state == LivenessState.multipleFaces;
     });
 
+    // Start appropriate animation based on state
+    _startStateAnimation(state);
+
     if (state != LivenessState.initial) {
       _overlayAnimationController.repeat(reverse: true);
       await _vibrateFeedback();
-    } else {
-      _overlayAnimationController.stop();
     }
 
     if (state == LivenessState.complete) {
       await _capturePhoto();
     }
+  }
+
+  void _stopAllAnimations() {
+    _initialAnimationController.reset();
+    _lookLeftAnimationController.reset();
+    _lookRightAnimationController.reset();
+    _lookStraightAnimationController.reset();
+    _processingAnimationController.reset();
+  }
+
+  void _startStateAnimation(LivenessState state) {
+    switch (state) {
+      case LivenessState.initial:
+        _initialAnimationController.repeat();
+        break;
+      case LivenessState.lookingLeft:
+        _lookLeftAnimationController.repeat();
+        break;
+      case LivenessState.lookingRight:
+        _lookRightAnimationController.repeat();
+        break;
+      case LivenessState.lookingStraight:
+        _lookStraightAnimationController.repeat();
+        break;
+      case LivenessState.complete:
+        _processingAnimationController.repeat();
+        break;
+      default:
+        break;
+    }
+  }
+
+  Widget _buildStateAnimation() {
+    String animationAsset;
+    AnimationController controller;
+
+    switch (_currentState) {
+      case LivenessState.initial:
+        animationAsset = 'assets/animations/face_scan.json';
+        controller = _initialAnimationController;
+        break;
+      case LivenessState.lookingLeft:
+        animationAsset = 'assets/animations/look_left.json';
+        controller = _lookLeftAnimationController;
+        break;
+      case LivenessState.lookingRight:
+        animationAsset = 'assets/animations/look_right.json';
+        controller = _lookRightAnimationController;
+        break;
+      case LivenessState.lookingStraight:
+        animationAsset = 'assets/animations/look_straight.json';
+        controller = _lookStraightAnimationController;
+        break;
+      case LivenessState.complete:
+        animationAsset = 'assets/animations/processing.json';
+        controller = _processingAnimationController;
+        break;
+      case LivenessState.multipleFaces:
+        animationAsset = 'assets/animations/multiple_faces.json';
+        controller = _initialAnimationController;
+        break;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      width: 40,
+      height: 40,
+      child: Lottie.asset(
+        animationAsset,
+        controller: controller,
+        package: 'liveness_detection_sdk',
+        fit: BoxFit.contain,
+      ),
+    );
   }
 
   Future<void> _vibrateFeedback() async {
@@ -195,31 +296,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  Widget _buildAnimationWidget() {
-    String animationAsset;
-
-    if (_hasMultipleFaces) {
-      animationAsset = _animationAssets[LivenessState.multipleFaces]!;
-    } else if (!_isFaceDetected) {
-      animationAsset = _animationAssets[LivenessState.initial]!;
-    } else {
-      animationAsset = _animationAssets[_currentState] ??
-          _animationAssets[LivenessState.initial]!;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 20),
-      child: Lottie.asset(
-        animationAsset,
-        width: 40,
-        height: 40,
-        package: 'liveness_detection_sdk',
-        animate: true,
-        repeat: true,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_controller?.value.isInitialized != true) {
@@ -254,7 +330,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
           ),
           Align(
             alignment: Alignment.topCenter,
-            child: _buildAnimationWidget(),
+            child: _buildStateAnimation(),
           ),
           Positioned(
             bottom: 50,
@@ -286,6 +362,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   void dispose() {
     _faceAnimationController.dispose();
     _overlayAnimationController.dispose();
+    _initialAnimationController.dispose();
+    _lookLeftAnimationController.dispose();
+    _lookRightAnimationController.dispose();
+    _lookStraightAnimationController.dispose();
+    _processingAnimationController.dispose();
     _livenessDetector?.dispose();
     _controller?.dispose();
     super.dispose();
