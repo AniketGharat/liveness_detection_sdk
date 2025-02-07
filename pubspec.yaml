@@ -25,6 +25,8 @@ dev_dependencies:
   flutter_lints: ^2.0.0
   mockito: ^5.4.2
 
+
 flutter:
   assets:
-    - assets/animations/
+    - assets/animations/face_scan.json
+    - assets/animations/multiple_faces.json
