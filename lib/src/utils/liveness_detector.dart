@@ -2,7 +2,6 @@ import 'package:camera/camera.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-
 import '../../liveness_sdk.dart';
 
 class LivenessDetector {
@@ -13,6 +12,7 @@ class LivenessDetector {
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
   int _requiredFramesCount = 0;
+  int _stableFrameCount = 0;
 
   LivenessDetector({
     required this.config,
@@ -41,18 +41,20 @@ class LivenessDetector {
 
       if (faces.isEmpty) {
         _updateState(LivenessState.initial, "Position your face in the circle");
+        _stableFrameCount = 0;
         return;
       }
 
       if (faces.length > 1) {
-        _updateState(LivenessState.initial, "Multiple faces detected");
+        _updateState(LivenessState.multipleFaces, "Multiple faces detected");
+        _stableFrameCount = 0;
         return;
       }
 
       final face = faces.first;
       await _processDetectedFace(face);
     } catch (e) {
-      print('Error processing image: $e');
+      debugPrint('Error processing image: $e');
     } finally {
       _isProcessing = false;
     }
@@ -81,10 +83,13 @@ class LivenessDetector {
     switch (_currentState) {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
-          _requiredFramesCount++;
-          if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(
-                LivenessState.lookingStraight, "Now turn your head left");
+          _stableFrameCount++;
+          if (_stableFrameCount >= 10) {
+            _requiredFramesCount++;
+            if (_requiredFramesCount >= config.requiredFrames) {
+              _updateState(LivenessState.lookingStraight,
+                  "Now turn your head left slowly");
+            }
           }
         } else {
           _resetProgress();
@@ -93,9 +98,13 @@ class LivenessDetector {
 
       case LivenessState.lookingStraight:
         if (headEulerY < -config.turnThreshold) {
-          _requiredFramesCount++;
-          if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.lookingLeft, "Now turn your head right");
+          _stableFrameCount++;
+          if (_stableFrameCount >= 10) {
+            _requiredFramesCount++;
+            if (_requiredFramesCount >= config.requiredFrames) {
+              _updateState(
+                  LivenessState.lookingLeft, "Now turn your head right slowly");
+            }
           }
         } else {
           _resetProgress();
@@ -104,9 +113,12 @@ class LivenessDetector {
 
       case LivenessState.lookingLeft:
         if (headEulerY > config.turnThreshold) {
-          _requiredFramesCount++;
-          if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.lookingRight, "Now center your face");
+          _stableFrameCount++;
+          if (_stableFrameCount >= 10) {
+            _requiredFramesCount++;
+            if (_requiredFramesCount >= config.requiredFrames) {
+              _updateState(LivenessState.lookingRight, "Now center your face");
+            }
           }
         } else {
           _resetProgress();
@@ -115,16 +127,19 @@ class LivenessDetector {
 
       case LivenessState.lookingRight:
         if (_isFaceCentered(face)) {
-          _requiredFramesCount++;
-          if (_requiredFramesCount >= config.requiredFrames) {
-            _updateState(LivenessState.complete, "Perfect! Processing...");
+          _stableFrameCount++;
+          if (_stableFrameCount >= 10) {
+            _requiredFramesCount++;
+            if (_requiredFramesCount >= config.requiredFrames) {
+              _updateState(LivenessState.complete, "Perfect! Processing...");
+            }
           }
         } else {
           _resetProgress();
         }
         break;
 
-      case LivenessState.complete:
+      default:
         break;
     }
   }
@@ -138,6 +153,7 @@ class LivenessDetector {
 
   void _resetProgress() {
     _requiredFramesCount = 0;
+    _stableFrameCount = 0;
   }
 
   void _updateState(LivenessState newState, String message) {
@@ -148,12 +164,14 @@ class LivenessDetector {
       LivenessState.lookingLeft => 0.5,
       LivenessState.lookingRight => 0.75,
       LivenessState.complete => 1.0,
+      LivenessState.multipleFaces => 0.0,
     };
     _requiredFramesCount = 0;
+    _stableFrameCount = 0;
     onStateChanged(newState, progress, message);
   }
 
-  Future<void> dispose() async {
-    await _faceDetector.close();
+  void dispose() {
+    _faceDetector.close();
   }
 }

@@ -4,4 +4,5 @@ enum LivenessState {
   lookingLeft,
   lookingRight,
   complete,
+  multipleFaces,
 }

@@ -1,6 +1,4 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-
 import '../../liveness_sdk.dart';
 
 class AnimatedLivenessMessage extends StatefulWidget {
