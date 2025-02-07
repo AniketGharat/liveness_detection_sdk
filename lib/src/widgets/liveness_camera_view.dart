@@ -12,7 +12,6 @@ import 'package:image/image.dart' as img;
 
 import '../../liveness_sdk.dart';
 import '../utils/newliveness.dart';
-import 'cameralottie.dart';
 
 class LivenessCameraView extends StatefulWidget {
   final Function(LivenessResult) onResult;
@@ -39,6 +38,14 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   bool _hasMultipleFaces = false;
   late AnimationController _faceAnimationController;
   late AnimationController _overlayAnimationController;
+
+  // Animation asset paths
+  final Map<LivenessState, String> _animationAssets = {
+    LivenessState.initial: 'assets/animations/face_scan.json',
+    LivenessState.lookingStraight: 'assets/animations/look_straight.json',
+    LivenessState.lookingLeft: 'assets/animations/look_left.json',
+    LivenessState.lookingRight: 'assets/animations/look_right.json',
+  };
 
   @override
   void initState() {
@@ -96,6 +103,51 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     } catch (e) {
       _handleError("Failed to initialize camera: $e");
     }
+  }
+
+  Widget _buildLottieAnimation() {
+    if (_hasMultipleFaces) {
+      return Positioned(
+        top: 40, // Fixed 40dp from top
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Container(
+            width: 40,
+            height: 40,
+            child: Lottie.asset(
+              'assets/animations/multiple_faces.json',
+              fit: BoxFit.contain,
+              package: 'liveness_detection_sdk',
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_currentState == LivenessState.complete) {
+      return const SizedBox.shrink();
+    }
+
+    final animationAsset = _animationAssets[_currentState];
+    if (animationAsset == null) return const SizedBox.shrink();
+
+    return Positioned(
+      top: 40, // Fixed 40dp from top
+      left: 0,
+      right: 0,
+      child: Center(
+        child: Container(
+          width: 40,
+          height: 40,
+          child: Lottie.asset(
+            animationAsset,
+            fit: BoxFit.contain,
+            package: 'liveness_detection_sdk',
+          ),
+        ),
+      ),
+    );
   }
 
   void _processImage(CameraImage image) async {
@@ -220,16 +272,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               state: _currentState,
             ),
           ),
-          if (!_isFaceDetected)
-            Center(
-              child: Lottie.asset('assets/animations/face_scan.json',
-                  width: 200, height: 200, package: 'liveness_detection_sdk'),
-            ),
-          if (_hasMultipleFaces)
-            Center(
-              child: Lottie.asset('assets/animations/multiple_faces.json',
-                  width: 200, height: 200, package: 'liveness_detection_sdk'),
-            ),
+          _buildLottieAnimation(),
           Positioned(
             bottom: 50,
             left: 20,
