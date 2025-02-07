@@ -1,13 +1,16 @@
+// liveness_camera_view.dart
 import 'dart:io';
-import 'dart:typed_data'; // Correct import for Uint8List
+import 'dart:typed_data';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
+import 'package:lottie/lottie.dart';
+import 'package:image/image.dart' as img;
+
 import '../../liveness_sdk.dart';
-import 'package:image/image.dart' as img; // Import the image package
 
 class LivenessCameraView extends StatefulWidget {
   final Function(LivenessResult) onResult;
@@ -23,55 +26,34 @@ class LivenessCameraView extends StatefulWidget {
   State<LivenessCameraView> createState() => _LivenessCameraViewState();
 }
 
-class _LivenessCameraViewState extends State<LivenessCameraView> {
+class _LivenessCameraViewState extends State<LivenessCameraView>
+    with TickerProviderStateMixin {
   CameraController? _controller;
-  late final LivenessDetector _livenessDetector;
   String _instruction = "Position your face in the circle";
-  Color _circleColor = Colors.white;
+  LivenessState _currentState = LivenessState.initial;
   double _progress = 0.0;
   bool _isFaceDetected = false;
-  bool _isCompleted = false;
+  bool _hasMultipleFaces = false;
+  late AnimationController _faceAnimationController;
+  late AnimationController _overlayAnimationController;
 
   @override
   void initState() {
     super.initState();
-    _livenessDetector = LivenessDetector(
-      config: widget.config,
-      onStateChanged: _handleStateChanged,
-    );
+    _initializeAnimations();
     _initializeCamera();
   }
 
-  void _handleStateChanged(
-      LivenessState state, double progress, String message) {
-    setState(() {
-      _progress = progress;
-      _instruction = message;
+  void _initializeAnimations() {
+    _faceAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
 
-      switch (state) {
-        case LivenessState.initial:
-          _circleColor = Colors.white;
-          break;
-        case LivenessState.lookingStraight:
-          _circleColor = Colors.green;
-          _vibrateFeedback();
-          break;
-        case LivenessState.lookingLeft:
-          _circleColor = Colors.green;
-          _vibrateFeedback();
-          break;
-        case LivenessState.lookingRight:
-          _circleColor = Colors.green;
-          _vibrateFeedback();
-          break;
-        case LivenessState.complete:
-          _circleColor = Colors.green;
-          _isCompleted = true;
-          _vibrateFeedback();
-          _capturePhoto();
-          break;
-      }
-    });
+    _overlayAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
   }
 
   Future<void> _initializeCamera() async {
@@ -81,33 +63,45 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       return;
     }
 
-    final cameras = await availableCameras();
-    final frontCamera = cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.front,
-      orElse: () => cameras.first,
-    );
-
-    _controller = CameraController(
-      frontCamera,
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
-
     try {
+      final cameras = await availableCameras();
+      final frontCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _controller = CameraController(
+        frontCamera,
+        ResolutionPreset.high,
+        enableAudio: false,
+      );
+
       await _controller!.initialize();
-      if (mounted) {
-        setState(() {});
-        await _controller!.startImageStream(_livenessDetector.processImage);
-      }
+
+      if (!mounted) return;
+
+      setState(() {});
+      await _controller!.startImageStream(_processImage);
     } catch (e) {
       _handleError("Failed to initialize camera: $e");
     }
   }
 
-  void _vibrateFeedback() async {
-    final hasVibrator = await Vibration.hasVibrator();
-    if (hasVibrator != null && hasVibrator) {
-      Vibration.vibrate(duration: 250);
+  void _processImage(CameraImage image) async {
+    try {
+      // Add your face detection logic here
+      // This is a placeholder for face detection processing
+      bool faceDetected = true; // Replace with actual detection
+      bool multipleFaces = false; // Replace with actual detection
+
+      if (mounted) {
+        setState(() {
+          _isFaceDetected = faceDetected;
+          _hasMultipleFaces = multipleFaces;
+        });
+      }
+    } catch (e) {
+      print('Error processing image: $e');
     }
   }
 
@@ -115,64 +109,44 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
     if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
-      await _controller!.stopImageStream();
+      if (_controller!.value.isStreamingImages) {
+        await _controller!.stopImageStream();
+      }
+
       final XFile photo = await _controller!.takePicture();
-      final File capturedFile = File(photo.path);
-      final Directory appDir = await getApplicationDocumentsDirectory();
+      final imagePath = await _processAndSaveImage(photo);
 
-      // Generate timestamp for unique filename
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final String imagePath = '${appDir.path}/liveness_capture_$timestamp.jpg';
+      widget.onResult(LivenessResult(
+        isSuccess: true,
+        imagePath: imagePath,
+      ));
 
-      // Clean up old files before saving new one
-      await _cleanupOldFiles(appDir);
-
-      // Load the image as a raw file
-      final imageBytes = await capturedFile.readAsBytes();
-      final img.Image? image = img.decodeImage(Uint8List.fromList(imageBytes));
-
-      if (image == null) {
-        throw Exception("Failed to decode the image");
+      if (mounted) {
+        Navigator.pop(context);
       }
-
-      // Flip the image horizontally
-      final flippedImage = img.flipHorizontal(image);
-
-      // Save the flipped image to a new file
-      final newFile = File(imagePath)
-        ..writeAsBytesSync(img.encodeJpg(flippedImage));
-
-      // Verify the new file exists and has content
-      if (!await newFile.exists()) {
-        throw Exception('Failed to save captured image');
-      }
-
-      widget.onResult(LivenessResult(isSuccess: true, imagePath: imagePath));
-      Navigator.pop(context);
     } catch (e) {
-      print('Error in _capturePhoto: $e');
-      _handleError("Failed to capture photo");
+      _handleError("Failed to capture photo: $e");
     }
   }
 
-  Future<void> _cleanupOldFiles(Directory appDir) async {
+  Future<String> _processAndSaveImage(XFile photo) async {
+    final File imageFile = File(photo.path);
+    final Directory appDir = await getApplicationDocumentsDirectory();
+    final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final String newPath = '${appDir.path}/liveness_$timestamp.jpg';
+
     try {
-      final files = appDir.listSync().whereType<File>().where(
-            (file) => file.path.contains('liveness_capture_'),
-          );
+      final bytes = await imageFile.readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) throw Exception("Failed to decode image");
 
-      // Keep only the 5 most recent files
-      if (files.length > 5) {
-        final sortedFiles = files.toList()
-          ..sort(
-              (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      final flippedImage = img.flipHorizontal(image);
+      final jpgBytes = img.encodeJpg(flippedImage);
+      await File(newPath).writeAsBytes(jpgBytes);
 
-        for (var file in sortedFiles.skip(5)) {
-          await file.delete();
-        }
-      }
+      return newPath;
     } catch (e) {
-      print('Error cleaning up old files: $e');
+      throw Exception("Failed to process image: $e");
     }
   }
 
@@ -181,23 +155,54 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       isSuccess: false,
       errorMessage: message,
     ));
-    Navigator.pop(context);
+    if (mounted) {
+      Navigator.pop(context);
+    }
   }
 
-  @override
-  void dispose() {
-    _controller?.dispose();
-    _livenessDetector.dispose();
-    super.dispose();
+  void _handleStateChanged(LivenessState state, String message) async {
+    if (!mounted) return;
+
+    setState(() {
+      _currentState = state;
+      _instruction = message;
+
+      _progress = switch (state) {
+        LivenessState.initial => 0.0,
+        LivenessState.lookingStraight => 0.25,
+        LivenessState.lookingLeft => 0.5,
+        LivenessState.lookingRight => 0.75,
+        LivenessState.complete => 1.0,
+      };
+    });
+
+    if (state != LivenessState.initial) {
+      _overlayAnimationController.repeat(reverse: true);
+      await _vibrateFeedback();
+    } else {
+      _overlayAnimationController.stop();
+    }
+
+    if (state == LivenessState.complete) {
+      await _capturePhoto();
+    }
+  }
+
+  Future<void> _vibrateFeedback() async {
+    if (await Vibration.hasVibrator() ?? false) {
+      await Vibration.vibrate(duration: 200);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_controller == null || !_controller!.value.isInitialized) {
+    if (_controller?.value.isInitialized != true) {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
+          child: CircularProgressIndicator(
+            color: Colors.white,
+          ),
         ),
       );
     }
@@ -207,87 +212,152 @@ class _LivenessCameraViewState extends State<LivenessCameraView> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          CameraPreview(_controller!),
-          CustomPaint(
-            painter: FaceDetectionPainter(
-              progress: _progress,
-              circleColor: _circleColor,
-              circleSize: widget.config.circleSize,
+          // Camera Preview
+          Transform.scale(
+            scale: 1.0,
+            child: Center(
+              child: CameraPreview(_controller!),
             ),
           ),
+
+          // Face Detection Overlay
+          CustomPaint(
+            painter: FaceOverlayPainter(
+              progress: _progress,
+              animation: _faceAnimationController,
+              circleSize: widget.config.circleSize,
+              state: _currentState,
+            ),
+          ),
+
+          // Face Detection Animation
+          if (!_isFaceDetected)
+            Center(
+              child: Lottie.asset(
+                'assets/animations/face_scan.json',
+                width: 200,
+                height: 200,
+              ),
+            ),
+
+          // Multiple Faces Warning
+          if (_hasMultipleFaces)
+            Center(
+              child: Lottie.asset(
+                'assets/animations/multiple_faces.json',
+                width: 200,
+                height: 200,
+              ),
+            ),
+
+          // Instruction Message
           Positioned(
             bottom: 50,
             left: 20,
             right: 20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(12),
+            child: _buildInstructionMessage(),
+          ),
+
+          // Close Button
+          Positioned(
+            top: 40,
+            right: 20,
+            child: IconButton(
+              icon: const Icon(
+                Icons.close,
+                color: Colors.white,
+                size: 30,
               ),
-              child: Text(
-                _instruction,
-                style: const TextStyle(color: Colors.white, fontSize: 18),
-                textAlign: TextAlign.center,
-              ),
+              onPressed: () => Navigator.pop(context),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildInstructionMessage() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _currentState == LivenessState.complete
+              ? Colors.green.withOpacity(0.3)
+              : Colors.white.withOpacity(0.3),
+          width: 2,
+        ),
+      ),
+      child: Text(
+        _instruction,
+        style: TextStyle(
+          color: _currentState == LivenessState.complete
+              ? Colors.green
+              : Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w500,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _faceAnimationController.dispose();
+    _overlayAnimationController.dispose();
+    _controller?.dispose();
+    super.dispose();
+  }
 }
 
-class FaceDetectionPainter extends CustomPainter {
+class FaceOverlayPainter extends CustomPainter {
   final double progress;
-  final Color circleColor;
+  final Animation<double> animation;
   final double circleSize;
+  final LivenessState state;
 
-  FaceDetectionPainter({
+  FaceOverlayPainter({
     required this.progress,
-    required this.circleColor,
+    required this.animation,
     required this.circleSize,
-  });
+    required this.state,
+  }) : super(repaint: animation);
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
+    // Draw circle
     final circlePaint = Paint()
-      ..color = Colors.white
+      ..color = Colors.white.withOpacity(animation.value)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0;
-
+      ..strokeWidth = 3;
     canvas.drawCircle(center, radius, circlePaint);
 
+    // Draw progress
     if (progress > 0) {
-      final rect = Rect.fromCircle(center: center, radius: radius);
-      const double startAngle = -pi / 2;
-      final segmentAngle = pi / 2;
-
-      final completedSegments = (progress * 4).floor();
-
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0;
+        ..strokeWidth = 3;
 
-      for (var i = 0; i < completedSegments; i++) {
-        canvas.drawArc(
-          rect,
-          startAngle + (i * segmentAngle),
-          segmentAngle,
-          false,
-          progressPaint,
-        );
-      }
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -pi / 2,
+        2 * pi * progress,
+        false,
+        progressPaint,
+      );
     }
   }
 
   @override
-  bool shouldRepaint(FaceDetectionPainter oldDelegate) =>
+  bool shouldRepaint(FaceOverlayPainter oldDelegate) =>
       progress != oldDelegate.progress ||
-      circleColor != oldDelegate.circleColor ||
-      circleSize != oldDelegate.circleSize;
+      animation != oldDelegate.animation ||
+      circleSize != oldDelegate.circleSize ||
+      state != oldDelegate.state;
 }
