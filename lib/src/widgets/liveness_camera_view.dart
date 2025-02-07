@@ -1,9 +1,9 @@
-// liveness_camera_view.dart
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:liveness_detection_sdk/src/widgets/animated_message.dart';
+import 'package:liveness_detection_sdk/src/widgets/face_overlay_painter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
@@ -11,6 +11,8 @@ import 'package:lottie/lottie.dart';
 import 'package:image/image.dart' as img;
 
 import '../../liveness_sdk.dart';
+import '../utils/newliveness.dart';
+import 'cameralottie.dart';
 
 class LivenessCameraView extends StatefulWidget {
   final Function(LivenessResult) onResult;
@@ -29,6 +31,7 @@ class LivenessCameraView extends StatefulWidget {
 class _LivenessCameraViewState extends State<LivenessCameraView>
     with TickerProviderStateMixin {
   CameraController? _controller;
+  LivenessDetector? _livenessDetector;
   String _instruction = "Position your face in the circle";
   LivenessState _currentState = LivenessState.initial;
   double _progress = 0.0;
@@ -74,9 +77,17 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         frontCamera,
         ResolutionPreset.high,
         enableAudio: false,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.bgra8888
+            : ImageFormatGroup.bgra8888,
       );
 
       await _controller!.initialize();
+
+      _livenessDetector = LivenessDetector(
+        config: widget.config,
+        onStateChanged: _handleStateChanged,
+      );
 
       if (!mounted) return;
 
@@ -88,21 +99,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _processImage(CameraImage image) async {
-    try {
-      // Add your face detection logic here
-      // This is a placeholder for face detection processing
-      bool faceDetected = true; // Replace with actual detection
-      bool multipleFaces = false; // Replace with actual detection
-
-      if (mounted) {
-        setState(() {
-          _isFaceDetected = faceDetected;
-          _hasMultipleFaces = multipleFaces;
-        });
-      }
-    } catch (e) {
-      print('Error processing image: $e');
-    }
+    if (_livenessDetector == null) return;
+    await _livenessDetector!.processImage(image);
   }
 
   Future<void> _capturePhoto() async {
@@ -160,20 +158,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  void _handleStateChanged(LivenessState state, String message) async {
+  void _handleStateChanged(
+      LivenessState state, double progress, String message) async {
     if (!mounted) return;
 
     setState(() {
       _currentState = state;
       _instruction = message;
-
-      _progress = switch (state) {
-        LivenessState.initial => 0.0,
-        LivenessState.lookingStraight => 0.25,
-        LivenessState.lookingLeft => 0.5,
-        LivenessState.lookingRight => 0.75,
-        LivenessState.complete => 1.0,
-      };
+      _progress = progress;
+      _isFaceDetected = state != LivenessState.initial;
+      _hasMultipleFaces = message.contains("Multiple faces");
     });
 
     if (state != LivenessState.initial) {
@@ -212,15 +206,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Camera Preview
           Transform.scale(
             scale: 1.0,
             child: Center(
               child: CameraPreview(_controller!),
             ),
           ),
-
-          // Face Detection Overlay
           CustomPaint(
             painter: FaceOverlayPainter(
               progress: _progress,
@@ -229,8 +220,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               state: _currentState,
             ),
           ),
-
-          // Face Detection Animation
           if (!_isFaceDetected)
             Center(
               child: Lottie.asset(
@@ -239,8 +228,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                 height: 200,
               ),
             ),
-
-          // Multiple Faces Warning
           if (_hasMultipleFaces)
             Center(
               child: Lottie.asset(
@@ -249,16 +236,15 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                 height: 200,
               ),
             ),
-
-          // Instruction Message
           Positioned(
             bottom: 50,
             left: 20,
             right: 20,
-            child: _buildInstructionMessage(),
+            child: AnimatedLivenessMessage(
+              message: _instruction,
+              state: _currentState,
+            ),
           ),
-
-          // Close Button
           Positioned(
             top: 40,
             right: 20,
@@ -276,88 +262,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     );
   }
 
-  Widget _buildInstructionMessage() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _currentState == LivenessState.complete
-              ? Colors.green.withOpacity(0.3)
-              : Colors.white.withOpacity(0.3),
-          width: 2,
-        ),
-      ),
-      child: Text(
-        _instruction,
-        style: TextStyle(
-          color: _currentState == LivenessState.complete
-              ? Colors.green
-              : Colors.white,
-          fontSize: 18,
-          fontWeight: FontWeight.w500,
-        ),
-        textAlign: TextAlign.center,
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _faceAnimationController.dispose();
     _overlayAnimationController.dispose();
+    _livenessDetector?.dispose();
     _controller?.dispose();
     super.dispose();
   }
-}
-
-class FaceOverlayPainter extends CustomPainter {
-  final double progress;
-  final Animation<double> animation;
-  final double circleSize;
-  final LivenessState state;
-
-  FaceOverlayPainter({
-    required this.progress,
-    required this.animation,
-    required this.circleSize,
-    required this.state,
-  }) : super(repaint: animation);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width * (circleSize / 2);
-
-    // Draw circle
-    final circlePaint = Paint()
-      ..color = Colors.white.withOpacity(animation.value)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    canvas.drawCircle(center, radius, circlePaint);
-
-    // Draw progress
-    if (progress > 0) {
-      final progressPaint = Paint()
-        ..color = Colors.green
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3;
-
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        -pi / 2,
-        2 * pi * progress,
-        false,
-        progressPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(FaceOverlayPainter oldDelegate) =>
-      progress != oldDelegate.progress ||
-      animation != oldDelegate.animation ||
-      circleSize != oldDelegate.circleSize ||
-      state != oldDelegate.state;
 }
