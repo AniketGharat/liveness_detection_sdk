@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+
 import '../../liveness_sdk.dart';
 
 class FaceOverlayPainter extends CustomPainter {
@@ -20,12 +21,14 @@ class FaceOverlayPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
+    // Draw outer circle
     final circlePaint = Paint()
-      ..color = Colors.white.withOpacity(animation.value)
+      ..color = Colors.white.withOpacity(0.8)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
     canvas.drawCircle(center, radius, circlePaint);
 
+    // Draw progress arc
     if (progress > 0) {
       final progressPaint = Paint()
         ..color = Colors.green
