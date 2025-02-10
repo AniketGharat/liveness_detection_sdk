@@ -109,7 +109,6 @@ class LivenessDetector {
         _handleNoFace();
         return;
       }
-
       if (faces.length > 1) {
         _handleMultipleFaces();
         return;
