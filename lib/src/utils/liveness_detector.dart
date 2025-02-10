@@ -15,6 +15,8 @@ class LivenessDetector {
   int _stableFrameCount = 0;
   DateTime? _lastErrorTime;
   int _consecutiveErrors = 0;
+  bool _hasCompletedLeft = false;
+  bool _hasCompletedRight = false;
 
   LivenessDetector({
     required this.config,
@@ -27,8 +29,8 @@ class LivenessDetector {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
-      minFaceSize: 0.1,
-      performanceMode: FaceDetectorMode.fast,
+      minFaceSize: 0.15,
+      performanceMode: FaceDetectorMode.accurate,
     );
     _faceDetector = FaceDetector(options: options);
   }
@@ -83,13 +85,11 @@ class LivenessDetector {
     final message = _getMessageForState(newState);
     final animation = _getAnimationForState(newState);
 
-    _requiredFramesCount = 0;
-    _stableFrameCount = 0;
     onStateChanged(newState, progress, message, animation);
   }
 
   Future<void> processImage(CameraImage image) async {
-    if (_isProcessing) return;
+    if (_isProcessing || _currentState == LivenessState.complete) return;
     _isProcessing = true;
 
     try {
@@ -98,18 +98,14 @@ class LivenessDetector {
 
       if (faces.isEmpty) {
         _handleNoFace();
-        return;
-      }
-
-      if (faces.length > 1) {
+      } else if (faces.length > 1) {
         _handleMultipleFaces();
-        return;
+      } else {
+        final face = faces.first;
+        await _processDetectedFace(face);
       }
-
-      final face = faces.first;
-      await _processDetectedFace(face);
-      _resetErrorCount();
     } catch (e) {
+      debugPrint('Error processing image: $e');
       _handleError(e);
     } finally {
       _isProcessing = false;
@@ -139,11 +135,11 @@ class LivenessDetector {
     }
     _lastErrorTime = now;
     _consecutiveErrors++;
-  }
 
-  void _resetErrorCount() {
-    _consecutiveErrors = 0;
-    _lastErrorTime = null;
+    if (_consecutiveErrors >= config.maxConsecutiveErrors) {
+      _resetProgress();
+      _updateState(LivenessState.initial);
+    }
   }
 
   Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
@@ -151,6 +147,7 @@ class LivenessDetector {
     allBytes.putUint8List(image.planes[0].bytes);
 
     final bytes = allBytes.done().buffer.asUint8List();
+
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
       rotation: InputImageRotation.rotation270deg,
@@ -158,54 +155,44 @@ class LivenessDetector {
       bytesPerRow: image.planes[0].bytesPerRow,
     );
 
-    return InputImage.fromBytes(bytes: bytes, metadata: metadata);
+    return InputImage.fromBytes(
+      bytes: bytes,
+      metadata: metadata,
+    );
   }
 
   Future<void> _processDetectedFace(Face face) async {
     final headEulerY = face.headEulerAngleY ?? 0.0;
 
-    if (_consecutiveErrors > 0) {
-      _consecutiveErrors = 0;
-    }
-
     switch (_currentState) {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
-          _incrementStableFrames(() {
-            _updateState(LivenessState.lookingLeft);
-          });
-        } else {
-          _resetProgress();
+          _updateState(LivenessState.lookingLeft);
         }
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY < -config.turnThreshold) {
-          _incrementStableFrames(() {
-            _updateState(LivenessState.lookingRight);
-          });
-        } else if (_stableFrameCount > 0) {
-          _stableFrameCount--;
+        if (headEulerY < -config.turnThreshold && !_hasCompletedLeft) {
+          _hasCompletedLeft = true;
+          _updateState(LivenessState.lookingRight);
         }
         break;
 
       case LivenessState.lookingRight:
-        if (headEulerY > config.turnThreshold) {
-          _incrementStableFrames(() {
-            _updateState(LivenessState.lookingStraight);
-          });
-        } else if (_stableFrameCount > 0) {
-          _stableFrameCount--;
+        if (headEulerY > config.turnThreshold && !_hasCompletedRight) {
+          _hasCompletedRight = true;
+          _updateState(LivenessState.lookingStraight);
         }
         break;
 
       case LivenessState.lookingStraight:
-        if (_isFaceCentered(face)) {
-          _incrementStableFrames(() {
+        if (_isFaceCentered(face) && _hasCompletedLeft && _hasCompletedRight) {
+          _stableFrameCount++;
+          if (_stableFrameCount >= config.requiredFrames) {
             _updateState(LivenessState.complete);
-          });
-        } else if (_stableFrameCount > 0) {
-          _stableFrameCount--;
+          }
+        } else {
+          _stableFrameCount = 0;
         }
         break;
 
@@ -214,26 +201,20 @@ class LivenessDetector {
     }
   }
 
-  void _incrementStableFrames(VoidCallback onComplete) {
-    _stableFrameCount++;
-    if (_stableFrameCount >= 5) {
-      _requiredFramesCount++;
-      if (_requiredFramesCount >= config.requiredFrames) {
-        onComplete();
-      }
-    }
-  }
-
   bool _isFaceCentered(Face face) {
     final eulerY = face.headEulerAngleY ?? 0.0;
     final eulerZ = face.headEulerAngleZ ?? 0.0;
-    return eulerY.abs() < config.straightThreshold * 1.2 &&
-        eulerZ.abs() < config.straightThreshold * 1.2;
+    return eulerY.abs() < config.straightThreshold &&
+        eulerZ.abs() < config.straightThreshold;
   }
 
   void _resetProgress() {
     _requiredFramesCount = 0;
     _stableFrameCount = 0;
+    _hasCompletedLeft = false;
+    _hasCompletedRight = false;
+    _consecutiveErrors = 0;
+    _lastErrorTime = null;
   }
 
   void dispose() {

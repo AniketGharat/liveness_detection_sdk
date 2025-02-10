@@ -304,7 +304,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
             ),
             if (_currentState == LivenessState.initial)
               Positioned(
-                top: MediaQuery.of(context).padding.bottom + 200,
+                top: MediaQuery.of(context).padding.bottom + 170,
                 left: 20,
                 right: 20,
                 child: Text(
