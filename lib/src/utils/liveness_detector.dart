@@ -91,14 +91,14 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY < -config.turnThreshold && !_hasCompletedLeft) {
+        if (headEulerY > -config.turnThreshold && !_hasCompletedLeft) {
           _hasCompletedLeft = true;
           _updateState(LivenessState.lookingRight);
         }
         break;
 
       case LivenessState.lookingRight:
-        if (headEulerY > config.turnThreshold && !_hasCompletedRight) {
+        if (headEulerY < config.turnThreshold && !_hasCompletedRight) {
           _hasCompletedRight = true;
           _updateState(LivenessState.lookingStraight);
         }
@@ -198,11 +198,11 @@ class LivenessDetector {
 
   String _getAnimationForState(LivenessState state) {
     return switch (state) {
-      LivenessState.initial => 'assets/animations/face_scan.json',
+      LivenessState.initial => 'assets/animations/face_scan_init.json',
       LivenessState.lookingLeft => 'assets/animations/look_left.json',
       LivenessState.lookingRight => 'assets/animations/look_right.json',
       LivenessState.lookingStraight => 'assets/animations/look_straight.json',
-      LivenessState.complete => 'assets/animations/success.json',
+      LivenessState.complete => 'assets/animations/face_success.json',
       LivenessState.multipleFaces => 'assets/animations/multiple_faces.json',
     };
   }
