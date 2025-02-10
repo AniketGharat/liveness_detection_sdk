@@ -1,11 +1,10 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-
-import '../../liveness_sdk.dart';
+import 'package:liveness_detection_sdk/liveness_sdk.dart';
 
 class FaceOverlayPainter extends CustomPainter {
   final double progress;
-  final Animation<double> animation;
+  final Animation animation;
   final double circleSize;
   final LivenessState state;
 
@@ -18,14 +17,27 @@ class FaceOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
+    final center = Offset(size.width / 2, size.height * 0.45);
     final radius = size.width * (circleSize / 2);
 
-    // Draw outer circle
+    // Draw overlay
+    final overlayPaint = Paint()
+      ..color = Colors.black.withOpacity(0.5)
+      ..style = PaintingStyle.fill;
+
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addOval(Rect.fromCircle(center: center, radius: radius))
+      ..fillType = PathFillType.evenOdd;
+
+    canvas.drawPath(path, overlayPaint);
+
+    // Draw circle
     final circlePaint = Paint()
-      ..color = Colors.white.withOpacity(0.8)
+      ..color = _getCircleColor()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
+
     canvas.drawCircle(center, radius, circlePaint);
 
     // Draw progress arc
@@ -42,6 +54,17 @@ class FaceOverlayPainter extends CustomPainter {
         false,
         progressPaint,
       );
+    }
+  }
+
+  Color _getCircleColor() {
+    switch (state) {
+      case LivenessState.multipleFaces:
+        return Colors.red.withOpacity(0.8);
+      case LivenessState.complete:
+        return Colors.green.withOpacity(0.8);
+      default:
+        return Colors.white.withOpacity(0.8);
     }
   }
 
