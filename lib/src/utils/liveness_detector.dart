@@ -2,17 +2,19 @@ import 'package:camera/camera.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:lottie/lottie.dart';
 import '../../liveness_sdk.dart';
 
 class LivenessDetector {
   final LivenessConfig config;
-  final Function(LivenessState, double, String) onStateChanged;
+  final Function(LivenessState, double, String, String) onStateChanged;
 
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
   int _requiredFramesCount = 0;
   int _stableFrameCount = 0;
+  String _currentAnimation = 'assets/animations/face_scan.json';
 
   LivenessDetector({
     required this.config,
@@ -29,6 +31,39 @@ class LivenessDetector {
       performanceMode: FaceDetectorMode.fast,
     );
     _faceDetector = FaceDetector(options: options);
+  }
+
+  String _getAnimationForState(LivenessState state) {
+    switch (state) {
+      case LivenessState.initial:
+        return 'assets/animations/face_scan.json';
+      case LivenessState.lookingStraight:
+        return 'assets/animations/look_straight.json';
+      case LivenessState.lookingLeft:
+        return 'assets/animations/look_left.json';
+      case LivenessState.lookingRight:
+        return 'assets/animations/look_right.json';
+      case LivenessState.complete:
+        return 'assets/animations/processing.json';
+      case LivenessState.multipleFaces:
+        return 'assets/animations/multiple_faces.json';
+    }
+  }
+
+  void _updateState(LivenessState newState, String message) {
+    _currentState = newState;
+    final progress = switch (newState) {
+      LivenessState.initial => 0.0,
+      LivenessState.lookingStraight => 0.25,
+      LivenessState.lookingLeft => 0.5,
+      LivenessState.lookingRight => 0.75,
+      LivenessState.complete => 1.0,
+      LivenessState.multipleFaces => 0.0,
+    };
+    _currentAnimation = _getAnimationForState(newState);
+    _requiredFramesCount = 0;
+    _stableFrameCount = 0;
+    onStateChanged(newState, progress, message, _currentAnimation);
   }
 
   Future<void> processImage(CameraImage image) async {
@@ -88,7 +123,7 @@ class LivenessDetector {
             _requiredFramesCount++;
             if (_requiredFramesCount >= config.requiredFrames) {
               _updateState(LivenessState.lookingStraight,
-                  "Now turn your head left slowly");
+                  "Great! Now turn your head left slowly");
             }
           }
         } else {
@@ -102,8 +137,8 @@ class LivenessDetector {
           if (_stableFrameCount >= 10) {
             _requiredFramesCount++;
             if (_requiredFramesCount >= config.requiredFrames) {
-              _updateState(
-                  LivenessState.lookingLeft, "Now turn your head right slowly");
+              _updateState(LivenessState.lookingLeft,
+                  "Good! Now turn your head right slowly");
             }
           }
         } else {
@@ -117,7 +152,8 @@ class LivenessDetector {
           if (_stableFrameCount >= 10) {
             _requiredFramesCount++;
             if (_requiredFramesCount >= config.requiredFrames) {
-              _updateState(LivenessState.lookingRight, "Now center your face");
+              _updateState(
+                  LivenessState.lookingRight, "Great! Now center your face");
             }
           }
         } else {
@@ -154,21 +190,6 @@ class LivenessDetector {
   void _resetProgress() {
     _requiredFramesCount = 0;
     _stableFrameCount = 0;
-  }
-
-  void _updateState(LivenessState newState, String message) {
-    _currentState = newState;
-    final progress = switch (newState) {
-      LivenessState.initial => 0.0,
-      LivenessState.lookingStraight => 0.25,
-      LivenessState.lookingLeft => 0.5,
-      LivenessState.lookingRight => 0.75,
-      LivenessState.complete => 1.0,
-      LivenessState.multipleFaces => 0.0,
-    };
-    _requiredFramesCount = 0;
-    _stableFrameCount = 0;
-    onStateChanged(newState, progress, message);
   }
 
   void dispose() {

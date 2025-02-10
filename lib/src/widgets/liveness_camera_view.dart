@@ -27,18 +27,20 @@ class LivenessCameraView extends StatefulWidget {
 
 class _LivenessCameraViewState extends State<LivenessCameraView>
     with TickerProviderStateMixin {
-  CameraController? _controller;
+  // Controllers
+  CameraController? _cameraController;
+  late AnimationController _faceAnimationController;
+  late AnimationController _overlayAnimationController;
+  final Map<LivenessState, AnimationController> _stateAnimationControllers = {};
+
+  // Detector and state
   LivenessDetector? _livenessDetector;
-  String _instruction = "Position your face in the circle";
   LivenessState _currentState = LivenessState.initial;
+  String _currentAnimationPath = 'assets/animations/face_scan.json';
+  String _instruction = "Position your face in the circle";
   double _progress = 0.0;
   bool _isFaceDetected = false;
   bool _hasMultipleFaces = false;
-  late AnimationController _faceAnimationController;
-  late AnimationController _overlayAnimationController;
-
-  // Map to store state-specific animation controllers
-  final Map<LivenessState, AnimationController> _stateAnimationControllers = {};
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _initializeAnimationControllers() {
+    // Main animation controllers
     _faceAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -58,16 +61,17 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       duration: const Duration(milliseconds: 800),
     );
 
-    // Initialize animation controllers for each state
-    LivenessState.values.forEach((state) {
+    // State-specific animation controllers
+    for (var state in LivenessState.values) {
       _stateAnimationControllers[state] = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 2000),
       );
-    });
+    }
   }
 
   Future<void> _initializeCamera() async {
+    // Request camera permission
     final status = await Permission.camera.request();
     if (status != PermissionStatus.granted) {
       _handleError("Camera permission required");
@@ -75,13 +79,15 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
 
     try {
+      // Get available cameras
       final cameras = await availableCameras();
       final frontCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
 
-      _controller = CameraController(
+      // Initialize camera controller
+      _cameraController = CameraController(
         frontCamera,
         ResolutionPreset.high,
         enableAudio: false,
@@ -90,8 +96,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
             : ImageFormatGroup.bgra8888,
       );
 
-      await _controller!.initialize();
+      await _cameraController!.initialize();
 
+      // Initialize liveness detector
       _livenessDetector = LivenessDetector(
         config: widget.config,
         onStateChanged: _handleStateChanged,
@@ -100,7 +107,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       if (!mounted) return;
 
       setState(() {});
-      await _controller!.startImageStream(_processImage);
+      await _cameraController!.startImageStream(_processImage);
     } catch (e) {
       _handleError("Failed to initialize camera: $e");
     }
@@ -128,13 +135,18 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  void _handleStateChanged(
-      LivenessState state, double progress, String message) async {
+  Future<void> _handleStateChanged(
+    LivenessState state,
+    double progress,
+    String message,
+    String animationPath,
+  ) async {
     if (!mounted) return;
 
-    // Stop all animations
-    _stateAnimationControllers.values
-        .forEach((controller) => controller.reset());
+    // Reset all animation controllers
+    for (var controller in _stateAnimationControllers.values) {
+      controller.reset();
+    }
 
     setState(() {
       _currentState = state;
@@ -142,9 +154,10 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _progress = progress;
       _isFaceDetected = state != LivenessState.initial;
       _hasMultipleFaces = state == LivenessState.multipleFaces;
+      _currentAnimationPath = animationPath;
     });
 
-    // Start the animation for the current state
+    // Start animation for current state
     _stateAnimationControllers[state]?.repeat();
 
     if (state != LivenessState.initial) {
@@ -157,7 +170,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  // Added missing methods
   void _handleError(String message) {
     widget.onResult(LivenessResult(
       isSuccess: false,
@@ -175,14 +187,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   Future<void> _capturePhoto() async {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
 
     try {
-      if (_controller!.value.isStreamingImages) {
-        await _controller!.stopImageStream();
+      if (_cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
       }
 
-      final XFile photo = await _controller!.takePicture();
+      final XFile photo = await _cameraController!.takePicture();
       final imagePath = await _processAndSaveImage(photo);
 
       widget.onResult(LivenessResult(
@@ -227,7 +241,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         width: 40,
         height: 40,
         child: Lottie.asset(
-          _getAnimationAsset(_currentState),
+          _currentAnimationPath,
           controller: _stateAnimationControllers[_currentState],
           package: 'liveness_detection_sdk',
           fit: BoxFit.contain,
@@ -236,30 +250,31 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_controller?.value.isInitialized != true) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(
-            color: Colors.white,
-          ),
+  Widget _buildCameraPreview() {
+    if (_cameraController?.value.isInitialized != true) {
+      return const Center(
+        child: CircularProgressIndicator(
+          color: Colors.white,
         ),
       );
     }
 
+    return Transform.scale(
+      scale: 1.0,
+      child: Center(
+        child: CameraPreview(_cameraController!),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Transform.scale(
-            scale: 1.0,
-            child: Center(
-              child: CameraPreview(_controller!),
-            ),
-          ),
+          _buildCameraPreview(),
           CustomPaint(
             painter: FaceOverlayPainter(
               progress: _progress,
@@ -299,10 +314,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   void dispose() {
     _faceAnimationController.dispose();
     _overlayAnimationController.dispose();
-    _stateAnimationControllers.values
-        .forEach((controller) => controller.dispose());
+    for (var controller in _stateAnimationControllers.values) {
+      controller.dispose();
+    }
     _livenessDetector?.dispose();
-    _controller?.dispose();
+    _cameraController?.dispose();
     super.dispose();
   }
 }
