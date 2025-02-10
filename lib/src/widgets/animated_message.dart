@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:liveness_detection_sdk/liveness_sdk.dart';
+
+import '../../liveness_sdk.dart';
 
 class AnimatedLivenessMessage extends StatefulWidget {
   final String message;
@@ -21,10 +22,12 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _opacityAnimation;
+  String _displayedMessage = '';
 
   @override
   void initState() {
     super.initState();
+    _displayedMessage = widget.message;
     _initializeAnimations();
   }
 
@@ -34,13 +37,13 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
       vsync: this,
     );
 
-    _scaleAnimation = TweenSequence([
+    _scaleAnimation = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: 0.0, end: 1.2),
+        tween: Tween<double>(begin: 0.0, end: 1.2),
         weight: 40.0,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: 1.2, end: 1.0),
+        tween: Tween<double>(begin: 1.2, end: 1.0),
         weight: 60.0,
       ),
     ]).animate(CurvedAnimation(
@@ -48,15 +51,41 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
       curve: Curves.easeOut,
     ));
 
-    _opacityAnimation = Tween(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
+    _opacityAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 0.0, end: 1.0),
+        weight: 40.0,
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1.0, end: 1.0),
+        weight: 60.0,
+      ),
+    ]).animate(CurvedAnimation(
       parent: _controller,
       curve: Curves.easeOut,
     ));
 
     _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(AnimatedLivenessMessage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.message != oldWidget.message) {
+      setState(() {
+        _displayedMessage = widget.message;
+      });
+      _controller.reset();
+      _controller.forward();
+    }
+  }
+
+  Color _getMessageColor() {
+    return switch (widget.state) {
+      LivenessState.complete => Colors.green,
+      LivenessState.initial => Colors.white,
+      _ => Colors.white,
+    };
   }
 
   @override
@@ -73,11 +102,15 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _getMessageColor().withOpacity(0.3),
+                  width: 2,
+                ),
               ),
               child: Text(
-                widget.message,
-                style: const TextStyle(
-                  color: Colors.white,
+                _displayedMessage,
+                style: TextStyle(
+                  color: _getMessageColor(),
                   fontSize: 18,
                   fontWeight: FontWeight.w500,
                 ),
