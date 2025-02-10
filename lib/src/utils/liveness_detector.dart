@@ -198,18 +198,12 @@ class LivenessDetector {
 
   String _getAnimationForState(LivenessState state) {
     return switch (state) {
-      LivenessState.initial =>
-        'packages/liveness_detection_sdk/assets/animations/face_scan.json',
-      LivenessState.lookingLeft =>
-        'packages/liveness_detection_sdk/assets/animations/look_left.json',
-      LivenessState.lookingRight =>
-        'packages/liveness_detection_sdk/assets/animations/look_right.json',
-      LivenessState.lookingStraight =>
-        'packages/liveness_detection_sdk/assets/animations/look_straight.json',
-      LivenessState.complete =>
-        'packages/liveness_detection_sdk/assets/animations/success.json',
-      LivenessState.multipleFaces =>
-        'packages/liveness_detection_sdk/assets/animations/multiple_faces.json',
+      LivenessState.initial => 'assets/animations/face_scan.json',
+      LivenessState.lookingLeft => 'assets/animations/look_left.json',
+      LivenessState.lookingRight => 'assets/animations/look_right.json',
+      LivenessState.lookingStraight => 'assets/animations/look_straight.json',
+      LivenessState.complete => 'assets/animations/success.json',
+      LivenessState.multipleFaces => 'assets/animations/multiple_faces.json',
     };
   }
 
