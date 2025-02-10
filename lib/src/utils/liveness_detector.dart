@@ -1,8 +1,20 @@
+import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:liveness_detection_sdk/liveness_sdk.dart';
+import 'dart:io';
+import 'package:liveness_detection_sdk/src/widgets/animated_message.dart';
+import 'package:liveness_detection_sdk/src/widgets/face_overlay_painter.dart';
+import 'package:liveness_detection_sdk/src/widgets/state_animation.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:vibration/vibration.dart';
+import 'package:image/image.dart' as img;
+import 'package:lottie/lottie.dart';
+
+// --- Liveness Detector ---
 
 class LivenessDetector {
   final LivenessConfig config;
@@ -37,12 +49,12 @@ class LivenessDetector {
     switch (state) {
       case LivenessState.initial:
         return 'assets/animations/face_scan.json';
-      case LivenessState.lookingStraight:
-        return 'assets/animations/look_straight.json';
       case LivenessState.lookingLeft:
         return 'assets/animations/turn_left.json';
       case LivenessState.lookingRight:
         return 'assets/animations/turn_right.json';
+      case LivenessState.lookingStraight:
+        return 'assets/animations/look_straight.json';
       case LivenessState.complete:
         return 'assets/animations/success.json';
       case LivenessState.multipleFaces:
@@ -54,12 +66,12 @@ class LivenessDetector {
     switch (state) {
       case LivenessState.initial:
         return "Position your face in the circle";
+      case LivenessState.lookingLeft:
+        return "Turn your head to the Left slowly";
+      case LivenessState.lookingRight:
+        return "Turn your head to the Right slowly";
       case LivenessState.lookingStraight:
         return "Look straight ahead";
-      case LivenessState.lookingLeft:
-        return "Turn your head left slowly";
-      case LivenessState.lookingRight:
-        return "Turn your head right slowly";
       case LivenessState.complete:
         return "Perfect! Processing...";
       case LivenessState.multipleFaces:
@@ -84,11 +96,11 @@ class LivenessDetector {
     switch (state) {
       case LivenessState.initial:
         return 0.0;
-      case LivenessState.lookingStraight:
-        return 0.25;
       case LivenessState.lookingLeft:
-        return 0.5;
+        return 0.25;
       case LivenessState.lookingRight:
+        return 0.5;
+      case LivenessState.lookingStraight:
         return 0.75;
       case LivenessState.complete:
         return 1.0;
@@ -174,16 +186,6 @@ class LivenessDetector {
       case LivenessState.initial:
         if (_isFaceStraight(face)) {
           _incrementStableFrames(() {
-            _updateState(LivenessState.lookingStraight);
-          });
-        } else {
-          _resetProgress();
-        }
-        break;
-
-      case LivenessState.lookingStraight:
-        if (headEulerY < -config.turnThreshold) {
-          _incrementStableFrames(() {
             _updateState(LivenessState.lookingLeft);
           });
         } else {
@@ -202,6 +204,16 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
+        if (headEulerY < -config.turnThreshold) {
+          _incrementStableFrames(() {
+            _updateState(LivenessState.lookingStraight);
+          });
+        } else {
+          _resetProgress();
+        }
+        break;
+
+      case LivenessState.lookingStraight:
         if (_isFaceStraight(face)) {
           _incrementStableFrames(() {
             _updateState(LivenessState.complete);
