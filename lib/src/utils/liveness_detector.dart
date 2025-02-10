@@ -1,3 +1,4 @@
+// liveness_detector.dart
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,6 @@ class LivenessDetector {
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
-  int _requiredFramesCount = 0;
   int _stableFrameCount = 0;
   DateTime? _lastErrorTime;
   int _consecutiveErrors = 0;
@@ -29,63 +29,32 @@ class LivenessDetector {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
+      enableTracking: true, // Enable face tracking
       minFaceSize: 0.15,
       performanceMode: FaceDetectorMode.accurate,
     );
     _faceDetector = FaceDetector(options: options);
   }
 
-  String _getAnimationForState(LivenessState state) {
-    switch (state) {
-      case LivenessState.initial:
-        return 'assets/animations/face_scan.json';
-      case LivenessState.lookingLeft:
-        return 'assets/animations/look_left.json';
-      case LivenessState.lookingRight:
-        return 'assets/animations/look_right.json';
-      case LivenessState.lookingStraight:
-        return 'assets/animations/look_straight.json';
-      case LivenessState.complete:
-        return 'assets/animations/success.json';
-      case LivenessState.multipleFaces:
-        return 'assets/animations/multiple_faces.json';
+  Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
+    final WriteBuffer allBytes = WriteBuffer();
+    for (final Plane plane in image.planes) {
+      allBytes.putUint8List(plane.bytes);
     }
-  }
+    final bytes = allBytes.done().buffer.asUint8List();
 
-  String _getMessageForState(LivenessState state) {
-    switch (state) {
-      case LivenessState.initial:
-        return "Position your face in the circle";
-      case LivenessState.lookingLeft:
-        return "Turn your head left slowly";
-      case LivenessState.lookingRight:
-        return "Turn your head right slowly";
-      case LivenessState.lookingStraight:
-        return "Look straight ahead";
-      case LivenessState.complete:
-        return "Perfect! Processing...";
-      case LivenessState.multipleFaces:
-        return "Only one face should be visible";
-    }
-  }
+    final metadata = InputImageMetadata(
+      size: Size(image.width.toDouble(), image.height.toDouble()),
+      rotation: InputImageRotation
+          .rotation270deg, // Adjust based on device orientation
+      format: InputImageFormat.bgra8888,
+      bytesPerRow: image.planes[0].bytesPerRow,
+    );
 
-  void _updateState(LivenessState newState) {
-    if (_currentState == newState) return;
-
-    _currentState = newState;
-    final progress = switch (newState) {
-      LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.25,
-      LivenessState.lookingRight => 0.5,
-      LivenessState.lookingStraight => 0.75,
-      LivenessState.complete => 1.0,
-      LivenessState.multipleFaces => 0.0,
-    };
-
-    final message = _getMessageForState(newState);
-    final animation = _getAnimationForState(newState);
-
-    onStateChanged(newState, progress, message, animation);
+    return InputImage.fromBytes(
+      bytes: bytes,
+      metadata: metadata,
+    );
   }
 
   Future<void> processImage(CameraImage image) async {
@@ -101,64 +70,14 @@ class LivenessDetector {
       } else if (faces.length > 1) {
         _handleMultipleFaces();
       } else {
-        final face = faces.first;
-        await _processDetectedFace(face);
+        await _processDetectedFace(faces.first);
       }
     } catch (e) {
       debugPrint('Error processing image: $e');
-      _handleError(e);
+      _handleError();
     } finally {
       _isProcessing = false;
     }
-  }
-
-  void _handleNoFace() {
-    _updateState(LivenessState.initial);
-    _incrementErrorCount();
-  }
-
-  void _handleMultipleFaces() {
-    _updateState(LivenessState.multipleFaces);
-    _incrementErrorCount();
-  }
-
-  void _handleError(dynamic error) {
-    debugPrint('Error processing image: $error');
-    _incrementErrorCount();
-  }
-
-  void _incrementErrorCount() {
-    final now = DateTime.now();
-    if (_lastErrorTime != null &&
-        now.difference(_lastErrorTime!) > config.errorTimeout) {
-      _consecutiveErrors = 0;
-    }
-    _lastErrorTime = now;
-    _consecutiveErrors++;
-
-    if (_consecutiveErrors >= config.maxConsecutiveErrors) {
-      _resetProgress();
-      _updateState(LivenessState.initial);
-    }
-  }
-
-  Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
-    final WriteBuffer allBytes = WriteBuffer();
-    allBytes.putUint8List(image.planes[0].bytes);
-
-    final bytes = allBytes.done().buffer.asUint8List();
-
-    final metadata = InputImageMetadata(
-      size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: InputImageRotation.rotation270deg,
-      format: InputImageFormat.bgra8888,
-      bytesPerRow: image.planes[0].bytesPerRow,
-    );
-
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: metadata,
-    );
   }
 
   Future<void> _processDetectedFace(Face face) async {
@@ -186,7 +105,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingStraight:
-        if (_isFaceCentered(face) && _hasCompletedLeft && _hasCompletedRight) {
+        if (_isFaceCentered(face)) {
           _stableFrameCount++;
           if (_stableFrameCount >= config.requiredFrames) {
             _updateState(LivenessState.complete);
@@ -208,13 +127,90 @@ class LivenessDetector {
         eulerZ.abs() < config.straightThreshold;
   }
 
+  void _handleNoFace() {
+    _updateState(LivenessState.initial);
+    _incrementErrorCount();
+  }
+
+  void _handleMultipleFaces() {
+    _updateState(LivenessState.multipleFaces);
+    _incrementErrorCount();
+  }
+
+  void _handleError() {
+    _incrementErrorCount();
+  }
+
+  void _incrementErrorCount() {
+    final now = DateTime.now();
+    if (_lastErrorTime != null &&
+        now.difference(_lastErrorTime!) > config.errorTimeout) {
+      _consecutiveErrors = 0;
+    }
+    _lastErrorTime = now;
+    _consecutiveErrors++;
+
+    if (_consecutiveErrors >= config.maxConsecutiveErrors) {
+      _resetProgress();
+    }
+  }
+
   void _resetProgress() {
-    _requiredFramesCount = 0;
     _stableFrameCount = 0;
     _hasCompletedLeft = false;
     _hasCompletedRight = false;
     _consecutiveErrors = 0;
     _lastErrorTime = null;
+    _updateState(LivenessState.initial);
+  }
+
+  void _updateState(LivenessState newState) {
+    if (_currentState == newState) return;
+
+    _currentState = newState;
+    final progress = switch (newState) {
+      LivenessState.initial => 0.0,
+      LivenessState.lookingLeft => 0.25,
+      LivenessState.lookingRight => 0.5,
+      LivenessState.lookingStraight => 0.75,
+      LivenessState.complete => 1.0,
+      LivenessState.multipleFaces => 0.0,
+    };
+
+    onStateChanged(
+      newState,
+      progress,
+      _getMessageForState(newState),
+      _getAnimationForState(newState),
+    );
+  }
+
+  String _getMessageForState(LivenessState state) {
+    return switch (state) {
+      LivenessState.initial => "Position your face in the circle",
+      LivenessState.lookingLeft => "Turn your head left slowly",
+      LivenessState.lookingRight => "Turn your head right slowly",
+      LivenessState.lookingStraight => "Look straight ahead",
+      LivenessState.complete => "Perfect! Processing...",
+      LivenessState.multipleFaces => "Only one face should be visible",
+    };
+  }
+
+  String _getAnimationForState(LivenessState state) {
+    return switch (state) {
+      LivenessState.initial =>
+        'packages/liveness_detection_sdk/assets/animations/face_scan.json',
+      LivenessState.lookingLeft =>
+        'packages/liveness_detection_sdk/assets/animations/look_left.json',
+      LivenessState.lookingRight =>
+        'packages/liveness_detection_sdk/assets/animations/look_right.json',
+      LivenessState.lookingStraight =>
+        'packages/liveness_detection_sdk/assets/animations/look_straight.json',
+      LivenessState.complete =>
+        'packages/liveness_detection_sdk/assets/animations/success.json',
+      LivenessState.multipleFaces =>
+        'packages/liveness_detection_sdk/assets/animations/multiple_faces.json',
+    };
   }
 
   void dispose() {
