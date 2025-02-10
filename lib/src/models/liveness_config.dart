@@ -8,12 +8,12 @@ class LivenessConfig {
   final double circleSize;
 
   const LivenessConfig({
-    this.requiredFrames = 5,
-    this.phaseDuration = const Duration(milliseconds: 500),
-    this.straightThreshold = 10.0,
-    this.turnThreshold = 15.0,
-    this.errorTimeout = const Duration(milliseconds: 500),
-    this.maxConsecutiveErrors = 2,
+    this.requiredFrames = 2,
+    this.phaseDuration = const Duration(milliseconds: 1000),
+    this.straightThreshold = 12.0,
+    this.turnThreshold = 12.0,
+    this.errorTimeout = const Duration(milliseconds: 300),
+    this.maxConsecutiveErrors = 3,
     this.circleSize = 0.8,
   });
 }

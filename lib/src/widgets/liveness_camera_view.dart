@@ -48,13 +48,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   void _initializeAnimationControllers() {
     _faceAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
 
     for (var state in LivenessState.values) {
       _stateAnimationControllers[state] = AnimationController(
         vsync: this,
-        duration: const Duration(milliseconds: 2000),
+        duration: const Duration(milliseconds: 3000),
       );
     }
   }
@@ -114,7 +114,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   ) async {
     if (!mounted) return;
 
-    // Reset all animation controllers
     for (var controller in _stateAnimationControllers.values) {
       controller.reset();
     }
@@ -126,7 +125,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _currentAnimationPath = animationPath;
     });
 
-    // Start animation for current state
     _stateAnimationControllers[state]?.repeat();
 
     if (state != LivenessState.initial) {
@@ -218,6 +216,25 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     );
   }
 
+  double _getStateProgress(LivenessState state) {
+    return switch (state) {
+      LivenessState.initial => 0.0,
+      LivenessState.lookingLeft => 0.25,
+      LivenessState.lookingRight => 0.5,
+      LivenessState.lookingStraight => 0.75,
+      LivenessState.complete => 1.0,
+      LivenessState.multipleFaces => 0.0,
+    };
+  }
+
+  void _handleCancel() {
+    widget.onResult(LivenessResult(
+      isSuccess: false,
+      errorMessage: "Cancelled by user",
+    ));
+    Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -235,13 +252,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
             ),
           ),
           if (_isInitialized) ...[
-            // State animation at the top
             StateAnimation(
               animationPath: _currentAnimationPath,
               controller: _stateAnimationControllers[_currentState]!,
               state: _currentState,
             ),
-            // Instructions at the bottom
             Positioned(
               bottom: 50,
               left: 20,
@@ -251,7 +266,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                 state: _currentState,
               ),
             ),
-            // Progress indicators
             Positioned(
               top: MediaQuery.of(context).padding.top + 20,
               left: 0,
@@ -276,7 +290,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                 }).toList(),
               ),
             ),
-            // Close button
             Positioned(
               top: MediaQuery.of(context).padding.top + 20,
               right: 20,
@@ -286,15 +299,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                   color: Colors.white,
                   size: 30,
                 ),
-                onPressed: () {
-                  _handleCancel();
-                },
+                onPressed: _handleCancel,
               ),
             ),
-            // Helper text for initial positioning
             if (_currentState == LivenessState.initial)
               Positioned(
-                top: MediaQuery.of(context).padding.top + 100,
+                top: MediaQuery.of(context).padding.top + 20,
                 left: 20,
                 right: 20,
                 child: Text(
@@ -313,25 +323,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     );
   }
 
-  double _getStateProgress(LivenessState state) {
-    return switch (state) {
-      LivenessState.initial => 0.0,
-      LivenessState.lookingStraight => 0.25,
-      LivenessState.lookingLeft => 0.5,
-      LivenessState.lookingRight => 0.75,
-      LivenessState.complete => 1.0,
-      LivenessState.multipleFaces => 0.0,
-    };
-  }
-
-  void _handleCancel() {
-    widget.onResult(LivenessResult(
-      isSuccess: false,
-      errorMessage: "Cancelled by user",
-    ));
-    Navigator.pop(context);
-  }
-
   @override
   void dispose() {
     _faceAnimationController.dispose();
@@ -341,34 +332,5 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     _livenessDetector?.dispose();
     _cameraController?.dispose();
     super.dispose();
-  }
-}
-
-// Add this helper widget for the state dots indicator
-class StateDotIndicator extends StatelessWidget {
-  final bool isCompleted;
-  final bool isActive;
-
-  const StateDotIndicator({
-    Key? key,
-    required this.isCompleted,
-    this.isActive = false,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 40,
-      height: 4,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: BoxDecoration(
-        color: isCompleted
-            ? Colors.green
-            : isActive
-                ? Colors.white
-                : Colors.white.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(2),
-      ),
-    );
   }
 }

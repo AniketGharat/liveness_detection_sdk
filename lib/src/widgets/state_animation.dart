@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:liveness_detection_sdk/liveness_sdk.dart';
 import 'package:lottie/lottie.dart';
-
-import '../../liveness_sdk.dart';
 
 class StateAnimation extends StatelessWidget {
   final String animationPath;
@@ -21,8 +20,8 @@ class StateAnimation extends StatelessWidget {
       alignment: Alignment.topCenter,
       child: Container(
         margin: const EdgeInsets.only(top: 60),
-        width: 120, // Increased size for better visibility
-        height: 120, // Increased size for better visibility
+        width: 30,
+        height: 30,
         child: Lottie.asset(
           animationPath,
           controller: controller,

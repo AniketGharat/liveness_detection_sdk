@@ -1,6 +1,6 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-
-import '../../liveness_sdk.dart';
+import 'package:liveness_detection_sdk/liveness_sdk.dart';
 
 class AnimatedLivenessMessage extends StatefulWidget {
   final String message;
@@ -33,7 +33,7 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
 
   void _initializeAnimations() {
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
 
@@ -80,14 +80,6 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
     }
   }
 
-  Color _getMessageColor() {
-    return switch (widget.state) {
-      LivenessState.complete => Colors.green,
-      LivenessState.initial => Colors.white,
-      _ => Colors.white,
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -103,14 +95,18 @@ class _AnimatedLivenessMessageState extends State<AnimatedLivenessMessage>
                 color: Colors.black.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: _getMessageColor().withOpacity(0.3),
+                  color: widget.state == LivenessState.complete
+                      ? Colors.green.withOpacity(0.3)
+                      : Colors.white.withOpacity(0.3),
                   width: 2,
                 ),
               ),
               child: Text(
                 _displayedMessage,
                 style: TextStyle(
-                  color: _getMessageColor(),
+                  color: widget.state == LivenessState.complete
+                      ? Colors.green
+                      : Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.w500,
                 ),

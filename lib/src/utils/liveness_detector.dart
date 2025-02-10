@@ -2,8 +2,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import '../../liveness_sdk.dart';
-import '../models/liveness_state.dart';
+import 'package:liveness_detection_sdk/liveness_sdk.dart';
 
 class LivenessDetector {
   final LivenessConfig config;
@@ -28,7 +27,7 @@ class LivenessDetector {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
-      minFaceSize: 0.15,
+      minFaceSize: 0.1,
       performanceMode: FaceDetectorMode.fast,
     );
     _faceDetector = FaceDetector(options: options);
@@ -38,12 +37,12 @@ class LivenessDetector {
     switch (state) {
       case LivenessState.initial:
         return 'assets/animations/face_scan.json';
-      case LivenessState.lookingStraight:
-        return 'assets/animations/look_straight.json';
       case LivenessState.lookingLeft:
         return 'assets/animations/look_left.json';
       case LivenessState.lookingRight:
         return 'assets/animations/look_right.json';
+      case LivenessState.lookingStraight:
+        return 'assets/animations/look_straight.json';
       case LivenessState.complete:
         return 'assets/animations/success.json';
       case LivenessState.multipleFaces:
@@ -55,12 +54,12 @@ class LivenessDetector {
     switch (state) {
       case LivenessState.initial:
         return "Position your face in the circle";
-      case LivenessState.lookingStraight:
-        return "Look straight ahead";
       case LivenessState.lookingLeft:
         return "Turn your head left slowly";
       case LivenessState.lookingRight:
         return "Turn your head right slowly";
+      case LivenessState.lookingStraight:
+        return "Look straight ahead";
       case LivenessState.complete:
         return "Perfect! Processing...";
       case LivenessState.multipleFaces:
@@ -74,9 +73,9 @@ class LivenessDetector {
     _currentState = newState;
     final progress = switch (newState) {
       LivenessState.initial => 0.0,
-      LivenessState.lookingStraight => 0.25,
-      LivenessState.lookingLeft => 0.5,
-      LivenessState.lookingRight => 0.75,
+      LivenessState.lookingLeft => 0.25,
+      LivenessState.lookingRight => 0.5,
+      LivenessState.lookingStraight => 0.75,
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };
@@ -149,9 +148,7 @@ class LivenessDetector {
 
   Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
     final WriteBuffer allBytes = WriteBuffer();
-    for (var plane in image.planes) {
-      allBytes.putUint8List(plane.bytes);
-    }
+    allBytes.putUint8List(image.planes[0].bytes);
 
     final bytes = allBytes.done().buffer.asUint8List();
     final metadata = InputImageMetadata(
@@ -167,19 +164,13 @@ class LivenessDetector {
   Future<void> _processDetectedFace(Face face) async {
     final headEulerY = face.headEulerAngleY ?? 0.0;
 
+    if (_consecutiveErrors > 0) {
+      _consecutiveErrors = 0;
+    }
+
     switch (_currentState) {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
-          _incrementStableFrames(() {
-            _updateState(LivenessState.lookingStraight);
-          });
-        } else {
-          _resetProgress();
-        }
-        break;
-
-      case LivenessState.lookingStraight:
-        if (headEulerY < -config.turnThreshold) {
           _incrementStableFrames(() {
             _updateState(LivenessState.lookingLeft);
           });
@@ -189,22 +180,32 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY > config.turnThreshold) {
+        if (headEulerY < -config.turnThreshold) {
           _incrementStableFrames(() {
             _updateState(LivenessState.lookingRight);
           });
-        } else {
-          _resetProgress();
+        } else if (_stableFrameCount > 0) {
+          _stableFrameCount--;
         }
         break;
 
       case LivenessState.lookingRight:
+        if (headEulerY > config.turnThreshold) {
+          _incrementStableFrames(() {
+            _updateState(LivenessState.lookingStraight);
+          });
+        } else if (_stableFrameCount > 0) {
+          _stableFrameCount--;
+        }
+        break;
+
+      case LivenessState.lookingStraight:
         if (_isFaceCentered(face)) {
           _incrementStableFrames(() {
             _updateState(LivenessState.complete);
           });
-        } else {
-          _resetProgress();
+        } else if (_stableFrameCount > 0) {
+          _stableFrameCount--;
         }
         break;
 
@@ -215,7 +216,7 @@ class LivenessDetector {
 
   void _incrementStableFrames(VoidCallback onComplete) {
     _stableFrameCount++;
-    if (_stableFrameCount >= 10) {
+    if (_stableFrameCount >= 5) {
       _requiredFramesCount++;
       if (_requiredFramesCount >= config.requiredFrames) {
         onComplete();
@@ -226,8 +227,8 @@ class LivenessDetector {
   bool _isFaceCentered(Face face) {
     final eulerY = face.headEulerAngleY ?? 0.0;
     final eulerZ = face.headEulerAngleZ ?? 0.0;
-    return eulerY.abs() < config.straightThreshold &&
-        eulerZ.abs() < config.straightThreshold;
+    return eulerY.abs() < config.straightThreshold * 1.2 &&
+        eulerZ.abs() < config.straightThreshold * 1.2;
   }
 
   void _resetProgress() {
