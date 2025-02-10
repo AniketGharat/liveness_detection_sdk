@@ -37,12 +37,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   late AnimationController _faceAnimationController;
   late AnimationController _overlayAnimationController;
 
-  // Animation controllers for each state
-  late AnimationController _initialAnimationController;
-  late AnimationController _lookLeftAnimationController;
-  late AnimationController _lookRightAnimationController;
-  late AnimationController _lookStraightAnimationController;
-  late AnimationController _processingAnimationController;
+  // Map to store state-specific animation controllers
+  final Map<LivenessState, AnimationController> _stateAnimationControllers = {};
 
   @override
   void initState() {
@@ -62,31 +58,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       duration: const Duration(milliseconds: 800),
     );
 
-    // Initialize state-specific animation controllers
-    _initialAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2000),
-    );
-
-    _lookLeftAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2000),
-    );
-
-    _lookRightAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2000),
-    );
-
-    _lookStraightAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2000),
-    );
-
-    _processingAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
+    // Initialize animation controllers for each state
+    LivenessState.values.forEach((state) {
+      _stateAnimationControllers[state] = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 2000),
+      );
+    });
   }
 
   Future<void> _initializeCamera() async {
@@ -133,12 +111,30 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     await _livenessDetector!.processImage(image);
   }
 
+  String _getAnimationAsset(LivenessState state) {
+    switch (state) {
+      case LivenessState.initial:
+        return 'assets/animations/face_scan.json';
+      case LivenessState.lookingLeft:
+        return 'assets/animations/look_left.json';
+      case LivenessState.lookingRight:
+        return 'assets/animations/look_right.json';
+      case LivenessState.lookingStraight:
+        return 'assets/animations/look_straight.json';
+      case LivenessState.complete:
+        return 'assets/animations/processing.json';
+      case LivenessState.multipleFaces:
+        return 'assets/animations/multiple_faces.json';
+    }
+  }
+
   void _handleStateChanged(
       LivenessState state, double progress, String message) async {
     if (!mounted) return;
 
-    // Stop all animation controllers
-    _stopAllAnimations();
+    // Stop all animations
+    _stateAnimationControllers.values
+        .forEach((controller) => controller.reset());
 
     setState(() {
       _currentState = state;
@@ -148,8 +144,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _hasMultipleFaces = state == LivenessState.multipleFaces;
     });
 
-    // Start appropriate animation based on state
-    _startStateAnimation(state);
+    // Start the animation for the current state
+    _stateAnimationControllers[state]?.repeat();
 
     if (state != LivenessState.initial) {
       _overlayAnimationController.repeat(reverse: true);
@@ -161,78 +157,15 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  void _stopAllAnimations() {
-    _initialAnimationController.reset();
-    _lookLeftAnimationController.reset();
-    _lookRightAnimationController.reset();
-    _lookStraightAnimationController.reset();
-    _processingAnimationController.reset();
-  }
-
-  void _startStateAnimation(LivenessState state) {
-    switch (state) {
-      case LivenessState.initial:
-        _initialAnimationController.repeat();
-        break;
-      case LivenessState.lookingLeft:
-        _lookLeftAnimationController.repeat();
-        break;
-      case LivenessState.lookingRight:
-        _lookRightAnimationController.repeat();
-        break;
-      case LivenessState.lookingStraight:
-        _lookStraightAnimationController.repeat();
-        break;
-      case LivenessState.complete:
-        _processingAnimationController.repeat();
-        break;
-      default:
-        break;
+  // Added missing methods
+  void _handleError(String message) {
+    widget.onResult(LivenessResult(
+      isSuccess: false,
+      errorMessage: message,
+    ));
+    if (mounted) {
+      Navigator.pop(context);
     }
-  }
-
-  Widget _buildStateAnimation() {
-    String animationAsset;
-    AnimationController controller;
-
-    switch (_currentState) {
-      case LivenessState.initial:
-        animationAsset = 'assets/animations/face_scan.json';
-        controller = _initialAnimationController;
-        break;
-      case LivenessState.lookingLeft:
-        animationAsset = 'assets/animations/look_left.json';
-        controller = _lookLeftAnimationController;
-        break;
-      case LivenessState.lookingRight:
-        animationAsset = 'assets/animations/look_right.json';
-        controller = _lookRightAnimationController;
-        break;
-      case LivenessState.lookingStraight:
-        animationAsset = 'assets/animations/look_straight.json';
-        controller = _lookStraightAnimationController;
-        break;
-      case LivenessState.complete:
-        animationAsset = 'assets/animations/processing.json';
-        controller = _processingAnimationController;
-        break;
-      case LivenessState.multipleFaces:
-        animationAsset = 'assets/animations/multiple_faces.json';
-        controller = _initialAnimationController;
-        break;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 20),
-      width: 40,
-      height: 40,
-      child: Lottie.asset(
-        animationAsset,
-        controller: controller,
-        package: 'liveness_detection_sdk',
-        fit: BoxFit.contain,
-      ),
-    );
   }
 
   Future<void> _vibrateFeedback() async {
@@ -286,14 +219,21 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  void _handleError(String message) {
-    widget.onResult(LivenessResult(
-      isSuccess: false,
-      errorMessage: message,
-    ));
-    if (mounted) {
-      Navigator.pop(context);
-    }
+  Widget _buildStateAnimation() {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Container(
+        margin: const EdgeInsets.only(top: 60),
+        width: 40,
+        height: 40,
+        child: Lottie.asset(
+          _getAnimationAsset(_currentState),
+          controller: _stateAnimationControllers[_currentState],
+          package: 'liveness_detection_sdk',
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
   }
 
   @override
@@ -328,10 +268,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               state: _currentState,
             ),
           ),
-          Align(
-            alignment: Alignment.topCenter,
-            child: _buildStateAnimation(),
-          ),
+          _buildStateAnimation(),
           Positioned(
             bottom: 50,
             left: 20,
@@ -362,11 +299,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   void dispose() {
     _faceAnimationController.dispose();
     _overlayAnimationController.dispose();
-    _initialAnimationController.dispose();
-    _lookLeftAnimationController.dispose();
-    _lookRightAnimationController.dispose();
-    _lookStraightAnimationController.dispose();
-    _processingAnimationController.dispose();
+    _stateAnimationControllers.values
+        .forEach((controller) => controller.dispose());
     _livenessDetector?.dispose();
     _controller?.dispose();
     super.dispose();
