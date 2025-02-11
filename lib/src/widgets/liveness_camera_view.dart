@@ -23,7 +23,7 @@ class LivenessCameraView extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<LivenessCameraView> createState() => _LivenessCameraViewState();
+  State createState() => _LivenessCameraViewState();
 }
 
 class _LivenessCameraViewState extends State<LivenessCameraView>
@@ -73,20 +73,19 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   Future<void> _initializeCamera() async {
     final status = await Permission.camera.request();
     if (status != PermissionStatus.granted) {
-      _handleError("Camera permission required");
+      handleError("Camera permission required");
       return;
     }
 
     try {
       _cameras = await availableCameras();
       if (_cameras == null || _cameras!.isEmpty) {
-        _handleError("No cameras available");
+        handleError("No cameras available");
         return;
       }
-
       await _setupCamera();
     } catch (e) {
-      _handleError("Failed to initialize camera: $e");
+      handleError("Failed to initialize camera: $e");
     }
   }
 
@@ -103,10 +102,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     for (var controller in _stateAnimationControllers.values) {
       controller.reset();
     }
-
-    // Restart the face animation controller
     _faceAnimationController.reset();
-    _faceAnimationController.repeat(reverse: true);
+    _faceAnimationController.repeat();
   }
 
   Future<void> _setupCamera() async {
@@ -135,7 +132,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       await _cameraController!.dispose();
       _cameraController = null;
     }
-
     _livenessDetector?.dispose();
     _livenessDetector = null;
 
@@ -156,13 +152,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _livenessDetector = LivenessDetector(
         config: widget.config,
         onStateChanged: _handleStateChanged,
+        isFrontCamera: _isFrontCamera,
       );
 
       if (!mounted) return;
 
       // Reset state and start processing
       _resetState();
-
       setState(() {
         _isInitialized = true;
         _isSwitchingCamera = false;
@@ -174,7 +170,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         await _cameraController!.startImageStream(_processImage);
       }
     } catch (e) {
-      _handleError("Failed to initialize camera: $e");
+      handleError("Failed to initialize camera: $e");
     }
   }
 
@@ -217,10 +213,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   ) async {
     if (!mounted || _isSwitchingCamera) return;
 
-    // Reset controllers only if state actually changed
-    if (_currentState != state) {
-      for (var controller in _stateAnimationControllers.values) {
-        controller.reset();
+    // Flip the direction for back camera
+    if (!_isFrontCamera) {
+      if (state == LivenessState.lookingLeft) {
+        message = "Turn your head right slowly";
+      } else if (state == LivenessState.lookingRight) {
+        message = "Turn your head left slowly";
       }
     }
 
@@ -271,7 +269,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         Navigator.pop(context);
       }
     } catch (e) {
-      _handleError("Failed to capture photo: $e");
+      handleError("Failed to capture photo: $e");
     }
   }
 
@@ -296,11 +294,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
-  void _handleError(String message) {
+  void handleError(String message) {
     widget.onResult(LivenessResult(
       isSuccess: false,
       errorMessage: message,
     ));
+
     if (mounted) {
       Navigator.pop(context);
     }
