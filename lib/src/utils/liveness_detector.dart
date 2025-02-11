@@ -116,7 +116,7 @@ class LivenessDetector {
 
       case LivenessState.lookingLeft:
         double threshold = isFrontCamera ? 30.0 : -30.0;
-        if (isFrontCamera ? headEulerY > -threshold : headEulerY > threshold) {
+        if (isFrontCamera ? headEulerY < -threshold : headEulerY > threshold) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
             _hasCompletedLeft = true;
@@ -130,7 +130,7 @@ class LivenessDetector {
 
       case LivenessState.lookingRight:
         double threshold = isFrontCamera ? 30.0 : -30.0;
-        if (isFrontCamera ? headEulerY < threshold : headEulerY < -threshold) {
+        if (isFrontCamera ? headEulerY > threshold : headEulerY < -threshold) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames &&
               !_hasCompletedRight) {
