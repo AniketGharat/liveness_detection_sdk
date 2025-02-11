@@ -17,7 +17,6 @@ class LivenessDetector {
   bool _hasCompletedLeft = false;
   bool _hasCompletedRight = false;
 
-  // Add timing control variables
   DateTime? _stateStartTime;
   DateTime? _lastStateChange;
   bool _isWaitingForNextState = false;
@@ -111,7 +110,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY > -config.turnThreshold && !_hasCompletedLeft) {
+        if (headEulerY < -config.turnThreshold && !_hasCompletedLeft) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedLeft = true;
@@ -124,7 +123,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
-        if (headEulerY < config.turnThreshold && !_hasCompletedRight) {
+        if (headEulerY > config.turnThreshold && !_hasCompletedRight) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedRight = true;
@@ -196,14 +195,8 @@ class LivenessDetector {
     _updateState(LivenessState.initial);
   }
 
-  void _updateState(LivenessState newState) {
-    if (_currentState == newState) return;
-
-    _currentState = newState;
-    _lastStateChange = DateTime.now();
-    _isWaitingForNextState = false;
-
-    final progress = switch (newState) {
+  double _calculateProgress(LivenessState state) {
+    return switch (state) {
       LivenessState.initial => 0.0,
       LivenessState.lookingLeft => 0.33,
       LivenessState.lookingRight => 0.66,
@@ -211,6 +204,16 @@ class LivenessDetector {
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };
+  }
+
+  void _updateState(LivenessState newState) {
+    if (_currentState == newState) return;
+
+    _currentState = newState;
+    _lastStateChange = DateTime.now();
+    _isWaitingForNextState = false;
+
+    final progress = _calculateProgress(newState);
 
     onStateChanged(
       newState,

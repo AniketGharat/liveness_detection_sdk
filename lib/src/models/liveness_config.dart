@@ -11,7 +11,7 @@ class LivenessConfig {
     this.requiredFrames = 5,
     this.phaseDuration = const Duration(milliseconds: 500),
     this.straightThreshold = 10.0,
-    this.turnThreshold = 10.0,
+    this.turnThreshold = 8.0,
     this.errorTimeout = const Duration(milliseconds: 500),
     this.maxConsecutiveErrors = 3,
     this.circleSize = 0.8,

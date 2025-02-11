@@ -38,6 +38,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   double _progress = 0.0;
   bool _isInitialized = false;
 
+  List<LivenessState> get _progressStates => [
+        LivenessState.initial,
+        LivenessState.lookingLeft,
+        LivenessState.lookingRight,
+        LivenessState.lookingStraight,
+      ];
+
   @override
   void initState() {
     super.initState();
@@ -127,7 +134,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
 
     _stateAnimationControllers[state]?.repeat();
 
-    if (state != LivenessState.initial) {
+    if (state != LivenessState.initial &&
+        state != LivenessState.multipleFaces) {
       await _vibrateFeedback();
     }
 
@@ -219,9 +227,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   double _getStateProgress(LivenessState state) {
     return switch (state) {
       LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.25,
-      LivenessState.lookingRight => 0.5,
-      LivenessState.lookingStraight => 0.75,
+      LivenessState.lookingLeft => 0.33,
+      LivenessState.lookingRight => 0.66,
+      LivenessState.lookingStraight => 1.0,
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };
@@ -272,9 +280,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               right: 0,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: LivenessState.values
-                    .where((state) => state != LivenessState.multipleFaces)
-                    .map((state) {
+                children: _progressStates.map((state) {
                   final isCompleted = _getStateProgress(state) <= _progress;
                   return Container(
                     width: 40,
