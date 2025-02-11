@@ -127,8 +127,8 @@ class LivenessDetector {
         final threshold = config.turnThreshold;
         final targetAngle = isFrontCamera ? -threshold : threshold;
 
-        if ((isFrontCamera && headEulerY < targetAngle) ||
-            (!isFrontCamera && headEulerY > targetAngle)) {
+        if ((isFrontCamera && headEulerY > targetAngle) ||
+            (!isFrontCamera && headEulerY < targetAngle)) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
             _hasCompletedLeft = true;
@@ -145,8 +145,8 @@ class LivenessDetector {
         final threshold = config.turnThreshold;
         final targetAngle = isFrontCamera ? threshold : -threshold;
 
-        if ((isFrontCamera && headEulerY > targetAngle) ||
-            (!isFrontCamera && headEulerY < targetAngle)) {
+        if ((isFrontCamera && headEulerY < targetAngle) ||
+            (!isFrontCamera && headEulerY > targetAngle)) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames &&
               !_hasCompletedRight) {
