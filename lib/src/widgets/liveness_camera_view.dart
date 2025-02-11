@@ -33,7 +33,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   final Map<LivenessState, AnimationController> _stateAnimationControllers = {};
   LivenessDetector? _livenessDetector;
   LivenessState _currentState = LivenessState.initial;
-  String _currentAnimationPath = 'assets/animations/face_scan.json';
+  String _currentAnimationPath = 'assets/animations/face_scan_init.json';
   String _instruction = "Position your face in the circle";
   double _progress = 0.0;
   bool _isInitialized = false;

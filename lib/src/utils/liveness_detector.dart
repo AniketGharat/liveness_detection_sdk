@@ -1,4 +1,3 @@
-// liveness_detector.dart
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -18,18 +17,26 @@ class LivenessDetector {
   bool _hasCompletedLeft = false;
   bool _hasCompletedRight = false;
 
+  // Add timing control variables
+  DateTime? _stateStartTime;
+  DateTime? _lastStateChange;
+  bool _isWaitingForNextState = false;
+  int _steadyFrameCount = 0;
+  static const int requiredSteadyFrames = 15;
+
   LivenessDetector({
     required this.config,
     required this.onStateChanged,
   }) {
     _initializeFaceDetector();
+    _updateState(LivenessState.initial);
   }
 
   void _initializeFaceDetector() {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
       enableClassification: true,
-      enableTracking: true, // Enable face tracking
+      enableTracking: true,
       minFaceSize: 0.15,
       performanceMode: FaceDetectorMode.accurate,
     );
@@ -45,8 +52,7 @@ class LivenessDetector {
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: InputImageRotation
-          .rotation270deg, // Adjust based on device orientation
+      rotation: InputImageRotation.rotation270deg,
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
@@ -82,25 +88,51 @@ class LivenessDetector {
 
   Future<void> _processDetectedFace(Face face) async {
     final headEulerY = face.headEulerAngleY ?? 0.0;
+    final now = DateTime.now();
+
+    _stateStartTime ??= now;
+
+    if (_lastStateChange != null &&
+        now.difference(_lastStateChange!) < config.phaseDuration) {
+      return;
+    }
 
     switch (_currentState) {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
-          _updateState(LivenessState.lookingLeft);
+          _steadyFrameCount++;
+          if (_steadyFrameCount >= requiredSteadyFrames) {
+            _updateState(LivenessState.lookingLeft);
+            _steadyFrameCount = 0;
+          }
+        } else {
+          _steadyFrameCount = 0;
         }
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY > -config.turnThreshold && !_hasCompletedLeft) {
-          _hasCompletedLeft = true;
-          _updateState(LivenessState.lookingRight);
+        if (headEulerY < -config.turnThreshold && !_hasCompletedLeft) {
+          _steadyFrameCount++;
+          if (_steadyFrameCount >= requiredSteadyFrames) {
+            _hasCompletedLeft = true;
+            _updateState(LivenessState.lookingRight);
+            _steadyFrameCount = 0;
+          }
+        } else {
+          _steadyFrameCount = 0;
         }
         break;
 
       case LivenessState.lookingRight:
-        if (headEulerY < config.turnThreshold && !_hasCompletedRight) {
-          _hasCompletedRight = true;
-          _updateState(LivenessState.lookingStraight);
+        if (headEulerY > config.turnThreshold && !_hasCompletedRight) {
+          _steadyFrameCount++;
+          if (_steadyFrameCount >= requiredSteadyFrames) {
+            _hasCompletedRight = true;
+            _updateState(LivenessState.lookingStraight);
+            _steadyFrameCount = 0;
+          }
+        } else {
+          _steadyFrameCount = 0;
         }
         break;
 
@@ -168,6 +200,9 @@ class LivenessDetector {
     if (_currentState == newState) return;
 
     _currentState = newState;
+    _lastStateChange = DateTime.now();
+    _isWaitingForNextState = false;
+
     final progress = switch (newState) {
       LivenessState.initial => 0.0,
       LivenessState.lookingLeft => 0.25,
