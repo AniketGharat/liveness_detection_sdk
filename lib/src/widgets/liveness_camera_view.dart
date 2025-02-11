@@ -133,7 +133,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         config: widget.config,
         onStateChanged: _handleStateChanged,
         isFrontCamera: _isFrontCamera,
-        cameraController: _cameraController!, // Fixed: Added required parameter
       );
 
       if (!mounted) return;

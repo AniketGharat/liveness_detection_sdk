@@ -27,7 +27,6 @@ class LivenessDetector {
     required this.config,
     required this.onStateChanged,
     required this.isFrontCamera,
-    required CameraController cameraController,
   }) {
     _initializeFaceDetector();
     _updateState(LivenessState.initial);
@@ -53,7 +52,7 @@ class LivenessDetector {
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: _getImageRotation(),
+      rotation: InputImageRotation.rotation270deg,
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
@@ -62,12 +61,6 @@ class LivenessDetector {
       bytes: bytes,
       metadata: metadata,
     );
-  }
-
-  InputImageRotation _getImageRotation() {
-    return isFrontCamera
-        ? InputImageRotation.rotation0deg
-        : InputImageRotation.rotation180deg;
   }
 
   Future<void> processImage(CameraImage image) async {
@@ -123,7 +116,7 @@ class LivenessDetector {
 
       case LivenessState.lookingLeft:
         double threshold = isFrontCamera ? 30.0 : -30.0;
-        if (isFrontCamera ? headEulerY > -threshold : headEulerY > threshold) {
+        if (isFrontCamera ? headEulerY < -threshold : headEulerY > threshold) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
             _hasCompletedLeft = true;
@@ -137,7 +130,7 @@ class LivenessDetector {
 
       case LivenessState.lookingRight:
         double threshold = isFrontCamera ? 30.0 : -30.0;
-        if (isFrontCamera ? headEulerY < threshold : headEulerY < -threshold) {
+        if (isFrontCamera ? headEulerY > threshold : headEulerY < -threshold) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames &&
               !_hasCompletedRight) {
