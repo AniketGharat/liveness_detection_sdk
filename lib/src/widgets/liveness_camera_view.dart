@@ -39,7 +39,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   bool _isFrontCamera = true;
   bool _isProcessing = false;
   bool _isSwitchingCamera = false;
-  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -49,11 +48,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _initializeAnimationControllers() {
+    // Main face overlay animation
     _faceAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
 
+    // Individual state animations
     for (var state in LivenessState.values) {
       _stateAnimationControllers[state] = AnimationController(
         vsync: this,
@@ -63,8 +64,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   Future<void> _initializeCamera() async {
-    if (_isDisposed) return;
-
     final status = await Permission.camera.request();
     if (status != PermissionStatus.granted) {
       _handleError("Camera permission required");
@@ -85,89 +84,67 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   Future<void> _setupCamera() async {
-    if (_isDisposed || _cameras == null || _cameras!.isEmpty) return;
+    if (_cameras == null || _cameras!.isEmpty) return;
 
-    // Set switching flag first
     setState(() {
       _isInitialized = false;
       _isSwitchingCamera = true;
     });
 
-    // Safely dispose of previous controller
-    await _safeDisposeCameraController();
+    // Stop current image stream if active
+    if (_cameraController?.value.isStreamingImages ?? false) {
+      await _cameraController?.stopImageStream();
+    }
+
+    // Dispose current resources
+    await _cameraController?.dispose();
+    _livenessDetector?.dispose();
+
+    // Select appropriate camera
+    final CameraDescription selectedCamera = _isFrontCamera
+        ? _cameras!.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.front,
+            orElse: () => _cameras!.first,
+          )
+        : _cameras!.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.back,
+            orElse: () => _cameras!.first,
+          );
+
+    _cameraController = CameraController(
+      selectedCamera,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.bgra8888
+          : ImageFormatGroup.bgra8888,
+    );
 
     try {
-      // Select appropriate camera
-      final CameraDescription selectedCamera = _isFrontCamera
-          ? _cameras!.firstWhere(
-              (camera) => camera.lensDirection == CameraLensDirection.front,
-              orElse: () => _cameras!.first,
-            )
-          : _cameras!.firstWhere(
-              (camera) => camera.lensDirection == CameraLensDirection.back,
-              orElse: () => _cameras!.first,
-            );
+      await _cameraController!.initialize();
 
-      // Create new controller
-      final newController = CameraController(
-        selectedCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: Platform.isAndroid
-            ? ImageFormatGroup.bgra8888
-            : ImageFormatGroup.bgra8888,
-      );
-
-      // Initialize the controller
-      await newController.initialize();
-
-      if (_isDisposed) {
-        await newController.dispose();
-        return;
-      }
-
-      _cameraController = newController;
       _livenessDetector = LivenessDetector(
         config: widget.config,
         onStateChanged: _handleStateChanged,
         isFrontCamera: _isFrontCamera,
       );
 
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-          _isSwitchingCamera = false;
-        });
+      if (!mounted) return;
 
-        _resetState();
+      setState(() {
+        _isInitialized = true;
+        _isSwitchingCamera = false;
+      });
 
-        // Add delay before starting image stream
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted && !_isDisposed && _cameraController != null) {
-          await _cameraController!.startImageStream(_processImage);
-        }
+      _resetState();
+
+      // Add delay before starting image stream
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted && _cameraController != null) {
+        await _cameraController!.startImageStream(_processImage);
       }
     } catch (e) {
-      if (mounted) {
-        _handleError("Failed to initialize camera: $e");
-      }
-    }
-  }
-
-  Future<void> _safeDisposeCameraController() async {
-    try {
-      final controller = _cameraController;
-      if (controller != null) {
-        if (controller.value.isStreamingImages) {
-          await controller.stopImageStream();
-        }
-        await controller.dispose();
-      }
-      _cameraController = null;
-      _livenessDetector?.dispose();
-      _livenessDetector = null;
-    } catch (e) {
-      debugPrint('Error disposing camera controller: $e');
+      _handleError("Failed to initialize camera: $e");
     }
   }
 
@@ -175,8 +152,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     if (_cameras == null ||
         _cameras!.length < 2 ||
         _isProcessing ||
-        _isSwitchingCamera ||
-        _isDisposed) {
+        _isSwitchingCamera) {
       return;
     }
 
@@ -184,16 +160,10 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _isFrontCamera = !_isFrontCamera;
     });
 
-    // Add a small delay before setting up the new camera
-    await Future.delayed(const Duration(milliseconds: 200));
-    if (mounted && !_isDisposed) {
-      await _setupCamera();
-    }
+    await _setupCamera();
   }
 
   void _resetState() {
-    if (_isDisposed) return;
-
     setState(() {
       _currentState = LivenessState.initial;
       _progress = 0.0;
@@ -202,10 +172,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _isProcessing = false;
     });
 
+    // Reset all animation controllers
     for (var controller in _stateAnimationControllers.values) {
       controller.reset();
     }
 
+    // Restart the face animation controller
     _faceAnimationController.reset();
     _faceAnimationController.repeat(reverse: true);
   }
@@ -214,14 +186,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     if (_livenessDetector == null ||
         _isProcessing ||
         _isSwitchingCamera ||
-        _isDisposed ||
         !mounted) return;
 
     _isProcessing = true;
     try {
       await _livenessDetector!.processImage(image);
     } finally {
-      if (mounted && !_isDisposed) {
+      if (mounted) {
         setState(() {
           _isProcessing = false;
         });
@@ -235,8 +206,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     String message,
     String animationPath,
   ) async {
-    if (!mounted || _isSwitchingCamera || _isDisposed) return;
+    if (!mounted || _isSwitchingCamera) return;
 
+    // Reset controllers only if state actually changed
     if (_currentState != state) {
       for (var controller in _stateAnimationControllers.values) {
         controller.reset();
@@ -269,9 +241,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   Future<void> _capturePhoto() async {
-    if (_cameraController == null ||
-        !_cameraController!.value.isInitialized ||
-        _isDisposed) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
 
@@ -282,8 +252,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
 
       final XFile photo = await _cameraController!.takePicture();
       final imagePath = await _processAndSaveImage(photo);
-
-      if (_isDisposed) return;
 
       widget.onResult(LivenessResult(
         isSuccess: true,
@@ -309,6 +277,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       final image = img.decodeImage(bytes);
       if (image == null) throw Exception("Failed to decode image");
 
+      // Only flip if using front camera
       final processedImage = _isFrontCamera ? img.flipHorizontal(image) : image;
       final jpgBytes = img.encodeJpg(processedImage);
       await File(newPath).writeAsBytes(jpgBytes);
@@ -320,8 +289,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _handleError(String message) {
-    if (_isDisposed) return;
-
     widget.onResult(LivenessResult(
       isSuccess: false,
       errorMessage: message,
@@ -332,8 +299,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _handleCancel() {
-    if (_isDisposed) return;
-
     widget.onResult(LivenessResult(
       isSuccess: false,
       errorMessage: "Cancelled by user",
@@ -478,12 +443,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
 
   @override
   void dispose() {
-    _isDisposed = true;
-    _safeDisposeCameraController();
     _faceAnimationController.dispose();
     for (var controller in _stateAnimationControllers.values) {
       controller.dispose();
     }
+    _livenessDetector?.dispose();
+    _cameraController?.dispose();
     super.dispose();
   }
 }
