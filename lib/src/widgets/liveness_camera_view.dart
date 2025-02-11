@@ -28,7 +28,7 @@ class LivenessCameraView extends StatefulWidget {
 
 class _LivenessCameraViewState extends State<LivenessCameraView>
     with TickerProviderStateMixin {
-  CameraController? _cameraController;
+  late CameraController? _cameraController;
   late AnimationController _faceAnimationController;
   final Map<LivenessState, AnimationController> _stateAnimationControllers = {};
   LivenessDetector? _livenessDetector;
@@ -133,6 +133,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         config: widget.config,
         onStateChanged: _handleStateChanged,
         isFrontCamera: _isFrontCamera,
+        cameraController: _cameraController!,
       );
 
       if (!mounted) return;
