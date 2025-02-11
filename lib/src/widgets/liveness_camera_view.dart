@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -329,38 +328,126 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
+        fit: StackFit.expand,
         children: [
           _buildCameraPreview(),
           CustomPaint(
             painter: FaceOverlayPainter(
               progress: _progress,
               animation: _faceAnimationController,
-              circleSize: 0.75,
+              circleSize: widget.config.circleSize,
               state: _currentState,
             ),
           ),
-          AnimatedLivenessMessage(
-            message: _instruction,
-            state: _currentState,
-          ),
-          Positioned(
-            top: 50,
-            left: 20,
-            child: IconButton(
-              icon: Icon(
-                _isFrontCamera ? Icons.camera_rear : Icons.camera_front,
-                color: Colors.white,
-              ),
-              onPressed: _switchCamera,
+          if (_isInitialized && !_isSwitchingCamera) ...[
+            StateAnimation(
+              animationPath: _currentAnimationPath,
+              controller: _stateAnimationControllers[_currentState]!,
+              state: _currentState,
             ),
-          ),
-          StateAnimation(
-            animationPath: _currentAnimationPath,
-            controller: _stateAnimationControllers[_currentState]!,
-            state: _currentState,
-          ),
+            Positioned(
+              bottom: 50,
+              left: 20,
+              right: 20,
+              child: AnimatedLivenessMessage(
+                message: _instruction,
+                state: _currentState,
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 20,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: _progressStates.map((state) {
+                  final isCompleted = _getStateProgress(state) <= _progress;
+                  return Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: isCompleted
+                          ? Colors.green
+                          : Colors.white.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 20,
+              left: 20,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.flip_camera_ios,
+                  color: Colors.white,
+                  size: 30,
+                ),
+                onPressed: _switchCamera,
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 20,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.close,
+                  color: Colors.white,
+                  size: 30,
+                ),
+                onPressed: _handleCancel,
+              ),
+            ),
+            if (_currentState == LivenessState.initial)
+              Positioned(
+                top: MediaQuery.of(context).padding.bottom + 170,
+                left: 20,
+                right: 20,
+                child: Text(
+                  "Make sure your face is well-lit and clearly visible",
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 16,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
         ],
       ),
     );
+  }
+
+  double _getStateProgress(LivenessState state) {
+    return switch (state) {
+      LivenessState.initial => 0.0,
+      LivenessState.lookingLeft => 0.25,
+      LivenessState.lookingRight => 0.50,
+      LivenessState.lookingStraight => 0.75,
+      LivenessState.complete => 1.0,
+      LivenessState.multipleFaces => 0.0,
+    };
+  }
+
+  void _handleCancel() {
+    widget.onResult(LivenessResult(
+      isSuccess: false,
+      errorMessage: "Cancelled by user",
+    ));
+    Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    _faceAnimationController.dispose();
+    for (var controller in _stateAnimationControllers.values) {
+      controller.dispose();
+    }
+    _livenessDetector?.dispose();
+    _cameraController?.dispose();
+    super.dispose();
   }
 }
