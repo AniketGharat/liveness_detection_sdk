@@ -217,16 +217,37 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   ) async {
     if (!mounted || _isSwitchingCamera) return;
 
-    // Reset controllers only if state actually changed
+    // Adjust directions for LookLeft and LookRight when switching cameras
     if (_currentState != state) {
       for (var controller in _stateAnimationControllers.values) {
         controller.reset();
+      }
+
+      if (_isFrontCamera &&
+          (state == LivenessState.lookingLeft ||
+              state == LivenessState.lookingRight)) {
+        setState(() {
+          if (state == LivenessState.lookingLeft) {
+            _instruction = "Look to the right";
+          } else if (state == LivenessState.lookingRight) {
+            _instruction = "Look to the left";
+          }
+        });
+      } else if (!_isFrontCamera &&
+          (state == LivenessState.lookingLeft ||
+              state == LivenessState.lookingRight)) {
+        setState(() {
+          if (state == LivenessState.lookingLeft) {
+            _instruction = "Look to the left";
+          } else if (state == LivenessState.lookingRight) {
+            _instruction = "Look to the right";
+          }
+        });
       }
     }
 
     setState(() {
       _currentState = state;
-      _instruction = message;
       _progress = progress;
       _currentAnimationPath = animationPath;
     });
@@ -355,99 +376,17 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               ),
             ),
             Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: _progressStates.map((state) {
-                  final isCompleted = _getStateProgress(state) <= _progress;
-                  return Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: isCompleted
-                          ? Colors.green
-                          : Colors.white.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
-              left: 20,
-              child: IconButton(
-                icon: const Icon(
-                  Icons.flip_camera_ios,
-                  color: Colors.white,
-                  size: 30,
-                ),
+              bottom: 10,
+              right: 10,
+              child: FloatingActionButton(
                 onPressed: _switchCamera,
+                backgroundColor: Colors.blue,
+                child: const Icon(Icons.switch_camera),
               ),
             ),
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
-              right: 20,
-              child: IconButton(
-                icon: const Icon(
-                  Icons.close,
-                  color: Colors.white,
-                  size: 30,
-                ),
-                onPressed: _handleCancel,
-              ),
-            ),
-            if (_currentState == LivenessState.initial)
-              Positioned(
-                top: MediaQuery.of(context).padding.bottom + 170,
-                left: 20,
-                right: 20,
-                child: Text(
-                  "Make sure your face is well-lit and clearly visible",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
-                    fontSize: 16,
-                    height: 1.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
           ],
         ],
       ),
     );
-  }
-
-  double _getStateProgress(LivenessState state) {
-    return switch (state) {
-      LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.25,
-      LivenessState.lookingRight => 0.50,
-      LivenessState.lookingStraight => 0.75,
-      LivenessState.complete => 1.0,
-      LivenessState.multipleFaces => 0.0,
-    };
-  }
-
-  void _handleCancel() {
-    widget.onResult(LivenessResult(
-      isSuccess: false,
-      errorMessage: "Cancelled by user",
-    ));
-    Navigator.pop(context);
-  }
-
-  @override
-  void dispose() {
-    _faceAnimationController.dispose();
-    for (var controller in _stateAnimationControllers.values) {
-      controller.dispose();
-    }
-    _livenessDetector?.dispose();
-    _cameraController?.dispose();
-    super.dispose();
   }
 }
