@@ -17,12 +17,17 @@ class LivenessDetector {
   bool _hasCompletedLeft = false;
   bool _hasCompletedRight = false;
 
-  // Add timing control variables
+  // Timing control variables
   DateTime? _stateStartTime;
   DateTime? _lastStateChange;
   bool _isWaitingForNextState = false;
   int _steadyFrameCount = 0;
-  static const int requiredSteadyFrames = 15;
+  static const int requiredSteadyFrames = 10;
+
+  // Head angle tracking
+  double _lastHeadAngle = 0.0;
+  static const double angleChangeThreshold = 5.0;
+  static const double minimumAngleChange = 2.0;
 
   LivenessDetector({
     required this.config,
@@ -97,6 +102,11 @@ class LivenessDetector {
       return;
     }
 
+    // Calculate the change in head angle
+    final angleChange = (headEulerY - _lastHeadAngle).abs();
+    final isAngleChanging = angleChange > minimumAngleChange;
+    _lastHeadAngle = headEulerY;
+
     switch (_currentState) {
       case LivenessState.initial:
         if (_isFaceCentered(face)) {
@@ -111,27 +121,31 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY < -config.turnThreshold && !_hasCompletedLeft) {
+        if (headEulerY < -config.turnThreshold &&
+            !isAngleChanging &&
+            !_hasCompletedLeft) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedLeft = true;
             _updateState(LivenessState.lookingRight);
             _steadyFrameCount = 0;
           }
-        } else {
+        } else if (isAngleChanging) {
           _steadyFrameCount = 0;
         }
         break;
 
       case LivenessState.lookingRight:
-        if (headEulerY > config.turnThreshold && !_hasCompletedRight) {
+        if (headEulerY > config.turnThreshold &&
+            !isAngleChanging &&
+            !_hasCompletedRight) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedRight = true;
             _updateState(LivenessState.lookingStraight);
             _steadyFrameCount = 0;
           }
-        } else {
+        } else if (isAngleChanging) {
           _steadyFrameCount = 0;
         }
         break;
@@ -160,7 +174,9 @@ class LivenessDetector {
   }
 
   void _handleNoFace() {
-    _updateState(LivenessState.initial);
+    if (_currentState != LivenessState.initial) {
+      _updateState(LivenessState.initial);
+    }
     _incrementErrorCount();
   }
 
@@ -189,10 +205,12 @@ class LivenessDetector {
 
   void _resetProgress() {
     _stableFrameCount = 0;
+    _steadyFrameCount = 0;
     _hasCompletedLeft = false;
     _hasCompletedRight = false;
     _consecutiveErrors = 0;
     _lastErrorTime = null;
+    _lastHeadAngle = 0.0;
     _updateState(LivenessState.initial);
   }
 
@@ -205,9 +223,9 @@ class LivenessDetector {
 
     final progress = switch (newState) {
       LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.25,
-      LivenessState.lookingRight => 0.5,
-      LivenessState.lookingStraight => 0.75,
+      LivenessState.lookingLeft => 0.33,
+      LivenessState.lookingRight => 0.66,
+      LivenessState.lookingStraight => 0.9,
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };
