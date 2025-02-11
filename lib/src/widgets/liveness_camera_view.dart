@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -41,6 +42,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   bool _isFrontCamera = true;
   bool _isProcessing = false;
   bool _isSwitchingCamera = false;
+
+  List<LivenessState> get _progressStates => [
+        LivenessState.initial,
+        LivenessState.lookingLeft,
+        LivenessState.lookingRight,
+        LivenessState.lookingStraight,
+      ];
 
   @override
   void initState() {
@@ -210,37 +218,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   ) async {
     if (!mounted || _isSwitchingCamera) return;
 
-    // Adjust directions for LookLeft and LookRight when switching cameras
+    // Reset controllers only if state actually changed
     if (_currentState != state) {
       for (var controller in _stateAnimationControllers.values) {
         controller.reset();
-      }
-
-      if (_isFrontCamera &&
-          (state == LivenessState.lookingLeft ||
-              state == LivenessState.lookingRight)) {
-        setState(() {
-          if (state == LivenessState.lookingLeft) {
-            _instruction = "Look to the right";
-          } else if (state == LivenessState.lookingRight) {
-            _instruction = "Look to the left";
-          }
-        });
-      } else if (!_isFrontCamera &&
-          (state == LivenessState.lookingLeft ||
-              state == LivenessState.lookingRight)) {
-        setState(() {
-          if (state == LivenessState.lookingLeft) {
-            _instruction = "Look to the left";
-          } else if (state == LivenessState.lookingRight) {
-            _instruction = "Look to the right";
-          }
-        });
       }
     }
 
     setState(() {
       _currentState = state;
+      _instruction = message;
       _progress = progress;
       _currentAnimationPath = animationPath;
     });
@@ -342,42 +329,36 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
-        fit: StackFit.expand,
         children: [
           _buildCameraPreview(),
           CustomPaint(
             painter: FaceOverlayPainter(
               progress: _progress,
               animation: _faceAnimationController,
-              circleSize: widget.config.circleSize,
+              circleSize: 0.75,
               state: _currentState,
             ),
           ),
-          if (_isInitialized && !_isSwitchingCamera) ...[
-            StateAnimation(
-              animationPath: _currentAnimationPath,
-              controller: _stateAnimationControllers[_currentState]!,
-              state: _currentState,
-            ),
-            Positioned(
-              bottom: 50,
-              left: 20,
-              right: 20,
-              child: AnimatedLivenessMessage(
-                message: _instruction,
-                state: _currentState,
+          AnimatedLivenessMessage(
+            message: _instruction,
+            state: _currentState,
+          ),
+          Positioned(
+            top: 50,
+            left: 20,
+            child: IconButton(
+              icon: Icon(
+                _isFrontCamera ? Icons.camera_rear : Icons.camera_front,
+                color: Colors.white,
               ),
+              onPressed: _switchCamera,
             ),
-            Positioned(
-              bottom: 10,
-              right: 10,
-              child: FloatingActionButton(
-                onPressed: _switchCamera,
-                backgroundColor: Colors.blue,
-                child: const Icon(Icons.switch_camera),
-              ),
-            ),
-          ],
+          ),
+          StateAnimation(
+            animationPath: _currentAnimationPath,
+            controller: _stateAnimationControllers[_currentState]!,
+            state: _currentState,
+          ),
         ],
       ),
     );
