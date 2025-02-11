@@ -42,13 +42,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   bool _isProcessing = false;
   bool _isSwitchingCamera = false;
 
-  List<LivenessState> get _progressStates => [
-        LivenessState.initial,
-        LivenessState.lookingLeft,
-        LivenessState.lookingRight,
-        LivenessState.lookingStraight,
-      ];
-
   @override
   void initState() {
     super.initState();
