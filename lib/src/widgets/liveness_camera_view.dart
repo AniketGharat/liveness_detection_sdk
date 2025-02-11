@@ -227,9 +227,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   double _getStateProgress(LivenessState state) {
     return switch (state) {
       LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.33,
-      LivenessState.lookingRight => 0.66,
-      LivenessState.lookingStraight => 1.0,
+      LivenessState.lookingLeft => 0.25,
+      LivenessState.lookingRight => 0.50,
+      LivenessState.lookingStraight => 0.75,
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };

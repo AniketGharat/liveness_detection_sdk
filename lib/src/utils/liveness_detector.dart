@@ -110,7 +110,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        if (headEulerY < -config.turnThreshold && !_hasCompletedLeft) {
+        if (headEulerY > -config.turnThreshold && !_hasCompletedLeft) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedLeft = true;
@@ -123,7 +123,7 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
-        if (headEulerY > config.turnThreshold && !_hasCompletedRight) {
+        if (headEulerY < config.turnThreshold && !_hasCompletedRight) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedRight = true;
@@ -198,9 +198,9 @@ class LivenessDetector {
   double _calculateProgress(LivenessState state) {
     return switch (state) {
       LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.33,
-      LivenessState.lookingRight => 0.66,
-      LivenessState.lookingStraight => 1.0,
+      LivenessState.lookingLeft => 0.25,
+      LivenessState.lookingRight => 0.50,
+      LivenessState.lookingStraight => 0.75,
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };
