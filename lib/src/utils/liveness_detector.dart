@@ -8,7 +8,6 @@ class LivenessDetector {
   final LivenessConfig config;
   final Function(LivenessState, double, String, String) onStateChanged;
   final bool isFrontCamera;
-  final CameraController _cameraController; // Add this line
 
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
@@ -28,9 +27,8 @@ class LivenessDetector {
     required this.config,
     required this.onStateChanged,
     required this.isFrontCamera,
-    required CameraController
-        cameraController, // Accept CameraController in the constructor
-  }) : _cameraController = cameraController {
+    required CameraController cameraController,
+  }) {
     _initializeFaceDetector();
     _updateState(LivenessState.initial);
   }
@@ -55,8 +53,7 @@ class LivenessDetector {
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation:
-          await _getCameraRotation(), // Dynamically get the camera rotation
+      rotation: _getImageRotation(),
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
@@ -67,20 +64,10 @@ class LivenessDetector {
     );
   }
 
-  Future<InputImageRotation> _getCameraRotation() async {
-    // Get the camera rotation based on the camera controller's current lens
-    if (_cameraController != null) {
-      final lensDirection = _cameraController.description.lensDirection;
-      switch (lensDirection) {
-        case CameraLensDirection.front:
-          return InputImageRotation.rotation0deg;
-        case CameraLensDirection.back:
-          return InputImageRotation.rotation180deg;
-        default:
-          return InputImageRotation.rotation0deg;
-      }
-    }
-    return InputImageRotation.rotation0deg;
+  InputImageRotation _getImageRotation() {
+    return isFrontCamera
+        ? InputImageRotation.rotation0deg
+        : InputImageRotation.rotation180deg;
   }
 
   Future<void> processImage(CameraImage image) async {

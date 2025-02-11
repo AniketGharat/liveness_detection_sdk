@@ -28,7 +28,7 @@ class LivenessCameraView extends StatefulWidget {
 
 class _LivenessCameraViewState extends State<LivenessCameraView>
     with TickerProviderStateMixin {
-  late CameraController _cameraController; // Non-nullable CameraController
+  CameraController? _cameraController;
   late AnimationController _faceAnimationController;
   final Map<LivenessState, AnimationController> _stateAnimationControllers = {};
   LivenessDetector? _livenessDetector;
@@ -99,12 +99,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     });
 
     // Stop current image stream if active
-    if (_cameraController.value.isStreamingImages) {
-      await _cameraController.stopImageStream();
+    if (_cameraController?.value.isStreamingImages ?? false) {
+      await _cameraController?.stopImageStream();
     }
 
     // Dispose current controller
-    await _cameraController.dispose();
+    await _cameraController?.dispose();
     _livenessDetector?.dispose();
 
     final CameraDescription selectedCamera = _isFrontCamera
@@ -127,13 +127,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     );
 
     try {
-      await _cameraController.initialize();
+      await _cameraController!.initialize();
 
       _livenessDetector = LivenessDetector(
         config: widget.config,
         onStateChanged: _handleStateChanged,
         isFrontCamera: _isFrontCamera,
-        cameraController: _cameraController,
+        cameraController: _cameraController!, // Fixed: Added required parameter
       );
 
       if (!mounted) return;
@@ -148,8 +148,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
 
       // Add delay before starting image stream
       await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted) {
-        await _cameraController.startImageStream(_processImage);
+      if (mounted && _cameraController != null) {
+        await _cameraController!.startImageStream(_processImage);
       }
     } catch (e) {
       _handleError("Failed to initialize camera: $e");
@@ -249,16 +249,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   Future<void> _capturePhoto() async {
-    if (!_cameraController.value.isInitialized) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
 
     try {
-      if (_cameraController.value.isStreamingImages) {
-        await _cameraController.stopImageStream();
+      if (_cameraController!.value.isStreamingImages) {
+        await _cameraController!.stopImageStream();
       }
 
-      final XFile photo = await _cameraController.takePicture();
+      final XFile photo = await _cameraController!.takePicture();
       final imagePath = await _processAndSaveImage(photo);
 
       widget.onResult(LivenessResult(
@@ -318,7 +318,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     return Transform.scale(
       scale: 1.0,
       child: Center(
-        child: CameraPreview(_cameraController),
+        child: CameraPreview(_cameraController!),
       ),
     );
   }
@@ -447,7 +447,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       controller.dispose();
     }
     _livenessDetector?.dispose();
-    _cameraController.dispose();
+    _cameraController?.dispose();
     super.dispose();
   }
 }
