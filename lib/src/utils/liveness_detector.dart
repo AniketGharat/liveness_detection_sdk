@@ -20,7 +20,6 @@ class LivenessDetector {
 
   DateTime? _stateStartTime;
   DateTime? _lastStateChange;
-  bool _isWaitingForNextState = false;
   int _steadyFrameCount = 0;
   static const int requiredSteadyFrames = 10;
 
@@ -88,18 +87,17 @@ class LivenessDetector {
   }
 
   Future<void> _processDetectedFace(Face face) async {
-    // Adjust headEulerY based on camera type
     var headEulerY = face.headEulerAngleY ?? 0.0;
     if (!isFrontCamera) {
-      // Invert the angle for back camera
       headEulerY = -headEulerY;
     }
 
     final now = DateTime.now();
     _stateStartTime ??= now;
 
+    // Ensure minimum time between state changes
     if (_lastStateChange != null &&
-        now.difference(_lastStateChange!) < config.phaseDuration) {
+        now.difference(_lastStateChange!) < const Duration(milliseconds: 500)) {
       return;
     }
 
@@ -117,15 +115,13 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        final threshold =
-            isFrontCamera ? -config.turnThreshold : config.turnThreshold;
-        if ((isFrontCamera ? headEulerY > threshold : headEulerY < threshold) &&
-            !_hasCompletedLeft) {
+        double threshold = isFrontCamera ? 30.0 : -30.0;
+        if (isFrontCamera ? headEulerY < -threshold : headEulerY > threshold) {
           _steadyFrameCount++;
-          if (_steadyFrameCount >= requiredSteadyFrames) {
+          if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
             _hasCompletedLeft = true;
-            _updateState(LivenessState.lookingRight);
             _steadyFrameCount = 0;
+            _updateState(LivenessState.lookingRight);
           }
         } else {
           _steadyFrameCount = 0;
@@ -133,15 +129,14 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
-        final threshold =
-            isFrontCamera ? config.turnThreshold : -config.turnThreshold;
-        if ((isFrontCamera ? headEulerY < threshold : headEulerY > threshold) &&
-            !_hasCompletedRight) {
+        double threshold = isFrontCamera ? 30.0 : -30.0;
+        if (isFrontCamera ? headEulerY > threshold : headEulerY < -threshold) {
           _steadyFrameCount++;
-          if (_steadyFrameCount >= requiredSteadyFrames) {
+          if (_steadyFrameCount >= requiredSteadyFrames &&
+              !_hasCompletedRight) {
             _hasCompletedRight = true;
-            _updateState(LivenessState.lookingStraight);
             _steadyFrameCount = 0;
+            _updateState(LivenessState.lookingStraight);
           }
         } else {
           _steadyFrameCount = 0;
@@ -151,7 +146,7 @@ class LivenessDetector {
       case LivenessState.lookingStraight:
         if (_isFaceCentered(face)) {
           _stableFrameCount++;
-          if (_stableFrameCount >= config.requiredFrames) {
+          if (_stableFrameCount >= requiredSteadyFrames) {
             _updateState(LivenessState.complete);
           }
         } else {
@@ -170,8 +165,8 @@ class LivenessDetector {
       eulerY = -eulerY;
     }
     final eulerZ = face.headEulerAngleZ ?? 0.0;
-    return eulerY.abs() < config.straightThreshold &&
-        eulerZ.abs() < config.straightThreshold;
+
+    return eulerY.abs() < 15.0 && eulerZ.abs() < 15.0;
   }
 
   void _handleNoFace() {
@@ -204,10 +199,13 @@ class LivenessDetector {
 
   void _resetProgress() {
     _stableFrameCount = 0;
+    _steadyFrameCount = 0;
     _hasCompletedLeft = false;
     _hasCompletedRight = false;
     _consecutiveErrors = 0;
     _lastErrorTime = null;
+    _stateStartTime = null;
+    _lastStateChange = null;
     _updateState(LivenessState.initial);
   }
 
@@ -227,13 +225,14 @@ class LivenessDetector {
 
     _currentState = newState;
     _lastStateChange = DateTime.now();
-    _isWaitingForNextState = false;
 
     final progress = _calculateProgress(newState);
-    final message = _getMessageForState(newState);
-    final animation = _getAnimationForState(newState);
-
-    onStateChanged(newState, progress, message, animation);
+    onStateChanged(
+      newState,
+      progress,
+      _getMessageForState(newState),
+      _getAnimationForState(newState),
+    );
   }
 
   String _getMessageForState(LivenessState state) {
@@ -249,7 +248,6 @@ class LivenessDetector {
   }
 
   String _getAnimationForState(LivenessState state) {
-    // Use same animation files for both cameras
     return switch (state) {
       LivenessState.initial => 'assets/animations/face_scan_init.json',
       LivenessState.lookingLeft => 'assets/animations/look_left.json',

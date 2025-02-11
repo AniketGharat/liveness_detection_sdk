@@ -162,7 +162,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _instruction = "Position your face in the circle";
       _currentAnimationPath = _isFrontCamera
           ? 'assets/animations/face_scan_init.json'
-          : 'assets/animations/back_face_scan_init.json';
+          : 'assets/animations/face_scan_init.json';
       _isProcessing = false;
     });
 
