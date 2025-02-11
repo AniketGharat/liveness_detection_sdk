@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +7,8 @@ import 'package:liveness_detection_sdk/liveness_sdk.dart';
 class LivenessDetector {
   final LivenessConfig config;
   final Function(LivenessState, double, String, String) onStateChanged;
+  final bool isFrontCamera;
+
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
   LivenessState _currentState = LivenessState.initial;
@@ -16,17 +17,17 @@ class LivenessDetector {
   int _consecutiveErrors = 0;
   bool _hasCompletedLeft = false;
   bool _hasCompletedRight = false;
+
   DateTime? _stateStartTime;
   DateTime? _lastStateChange;
   bool _isWaitingForNextState = false;
   int _steadyFrameCount = 0;
   static const int requiredSteadyFrames = 10;
-  final bool isFrontCamera;
 
   LivenessDetector({
     required this.config,
     required this.onStateChanged,
-    this.isFrontCamera = true,
+    required this.isFrontCamera,
   }) {
     _initializeFaceDetector();
     _updateState(LivenessState.initial);
@@ -49,12 +50,14 @@ class LivenessDetector {
       allBytes.putUint8List(plane.bytes);
     }
     final bytes = allBytes.done().buffer.asUint8List();
+
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
       rotation: InputImageRotation.rotation270deg,
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
+
     return InputImage.fromBytes(
       bytes: bytes,
       metadata: metadata,
@@ -63,8 +66,8 @@ class LivenessDetector {
 
   Future<void> processImage(CameraImage image) async {
     if (_isProcessing || _currentState == LivenessState.complete) return;
-
     _isProcessing = true;
+
     try {
       final inputImage = await _convertCameraImageToInputImage(image);
       final faces = await _faceDetector.processImage(inputImage);
@@ -85,7 +88,13 @@ class LivenessDetector {
   }
 
   Future<void> _processDetectedFace(Face face) async {
-    final headEulerY = face.headEulerAngleY ?? 0.0;
+    // Adjust headEulerY based on camera type
+    var headEulerY = face.headEulerAngleY ?? 0.0;
+    if (!isFrontCamera) {
+      // Invert the angle for back camera
+      headEulerY = -headEulerY;
+    }
+
     final now = DateTime.now();
     _stateStartTime ??= now;
 
@@ -110,8 +119,8 @@ class LivenessDetector {
       case LivenessState.lookingLeft:
         final threshold =
             isFrontCamera ? -config.turnThreshold : config.turnThreshold;
-        if ((isFrontCamera && headEulerY > threshold && !_hasCompletedLeft) ||
-            (!isFrontCamera && headEulerY < threshold && !_hasCompletedLeft)) {
+        if ((isFrontCamera ? headEulerY > threshold : headEulerY < threshold) &&
+            !_hasCompletedLeft) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedLeft = true;
@@ -126,8 +135,8 @@ class LivenessDetector {
       case LivenessState.lookingRight:
         final threshold =
             isFrontCamera ? config.turnThreshold : -config.turnThreshold;
-        if ((isFrontCamera && headEulerY < threshold && !_hasCompletedRight) ||
-            (!isFrontCamera && headEulerY > threshold && !_hasCompletedRight)) {
+        if ((isFrontCamera ? headEulerY < threshold : headEulerY > threshold) &&
+            !_hasCompletedRight) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames) {
             _hasCompletedRight = true;
@@ -156,7 +165,10 @@ class LivenessDetector {
   }
 
   bool _isFaceCentered(Face face) {
-    final eulerY = face.headEulerAngleY ?? 0.0;
+    var eulerY = face.headEulerAngleY ?? 0.0;
+    if (!isFrontCamera) {
+      eulerY = -eulerY;
+    }
     final eulerZ = face.headEulerAngleZ ?? 0.0;
     return eulerY.abs() < config.straightThreshold &&
         eulerZ.abs() < config.straightThreshold;
@@ -184,6 +196,7 @@ class LivenessDetector {
     }
     _lastErrorTime = now;
     _consecutiveErrors++;
+
     if (_consecutiveErrors >= config.maxConsecutiveErrors) {
       _resetProgress();
     }
@@ -217,19 +230,18 @@ class LivenessDetector {
     _isWaitingForNextState = false;
 
     final progress = _calculateProgress(newState);
-    onStateChanged(
-      newState,
-      progress,
-      _getMessageForState(newState),
-      _getAnimationForState(newState),
-    );
+    final message = _getMessageForState(newState);
+    final animation = _getAnimationForState(newState);
+
+    onStateChanged(newState, progress, message, animation);
   }
 
   String _getMessageForState(LivenessState state) {
+    final leftRight = isFrontCamera ? ["left", "right"] : ["right", "left"];
     return switch (state) {
       LivenessState.initial => "Position your face in the circle",
-      LivenessState.lookingLeft => "Turn your head left slowly",
-      LivenessState.lookingRight => "Turn your head right slowly",
+      LivenessState.lookingLeft => "Turn your head ${leftRight[0]} slowly",
+      LivenessState.lookingRight => "Turn your head ${leftRight[1]} slowly",
       LivenessState.lookingStraight => "Look straight ahead",
       LivenessState.complete => "Perfect! Processing...",
       LivenessState.multipleFaces => "Only one face should be visible",
@@ -237,6 +249,7 @@ class LivenessDetector {
   }
 
   String _getAnimationForState(LivenessState state) {
+    // Use same animation files for both cameras
     return switch (state) {
       LivenessState.initial => 'assets/animations/face_scan_init.json',
       LivenessState.lookingLeft => 'assets/animations/look_left.json',
