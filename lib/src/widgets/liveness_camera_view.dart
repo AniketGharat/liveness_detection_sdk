@@ -37,6 +37,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   String _instruction = "Position your face in the circle";
   double _progress = 0.0;
   bool _isInitialized = false;
+  List<CameraDescription>? _cameras;
+  bool _isFrontCamera = true;
 
   List<LivenessState> get _progressStates => [
         LivenessState.initial,
@@ -74,21 +76,45 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
 
     try {
-      final cameras = await availableCameras();
-      final frontCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
+      _cameras = await availableCameras();
+      if (_cameras == null || _cameras!.isEmpty) {
+        _handleError("No cameras available");
+        return;
+      }
 
-      _cameraController = CameraController(
-        frontCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: Platform.isAndroid
-            ? ImageFormatGroup.bgra8888
-            : ImageFormatGroup.bgra8888,
-      );
+      await _setupCamera();
+    } catch (e) {
+      _handleError("Failed to initialize camera: $e");
+    }
+  }
 
+  Future<void> _setupCamera() async {
+    if (_cameras == null || _cameras!.isEmpty) return;
+
+    final CameraDescription selectedCamera = _isFrontCamera
+        ? _cameras!.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.front,
+            orElse: () => _cameras!.first,
+          )
+        : _cameras!.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.back,
+            orElse: () => _cameras!.first,
+          );
+
+    if (_cameraController != null) {
+      await _cameraController!.dispose();
+    }
+
+    _cameraController = CameraController(
+      selectedCamera,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.bgra8888
+          : ImageFormatGroup.bgra8888,
+    );
+
+    try {
       await _cameraController!.initialize();
 
       _livenessDetector = LivenessDetector(
@@ -106,6 +132,17 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     } catch (e) {
       _handleError("Failed to initialize camera: $e");
     }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras == null || _cameras!.length < 2) return;
+
+    setState(() {
+      _isInitialized = false;
+      _isFrontCamera = !_isFrontCamera;
+    });
+
+    await _setupCamera();
   }
 
   void _processImage(CameraImage image) async {
@@ -187,8 +224,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       final image = img.decodeImage(bytes);
       if (image == null) throw Exception("Failed to decode image");
 
-      final flippedImage = img.flipHorizontal(image);
-      final jpgBytes = img.encodeJpg(flippedImage);
+      // Only flip the image if using front camera
+      final processedImage = _isFrontCamera ? img.flipHorizontal(image) : image;
+      final jpgBytes = img.encodeJpg(processedImage);
       await File(newPath).writeAsBytes(jpgBytes);
 
       return newPath;
@@ -296,6 +334,20 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                 }).toList(),
               ),
             ),
+            // Switch Camera Button
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 20,
+              left: 20,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.flip_camera_ios,
+                  color: Colors.white,
+                  size: 30,
+                ),
+                onPressed: _switchCamera,
+              ),
+            ),
+            // Close Button
             Positioned(
               top: MediaQuery.of(context).padding.top + 20,
               right: 20,
