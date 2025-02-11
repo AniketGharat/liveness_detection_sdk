@@ -1,16 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:liveness_detection_sdk/src/widgets/animated_message.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
 import 'package:image/image.dart' as img;
+import 'package:liveness_detection_sdk/src/widgets/animated_message.dart';
+import 'package:liveness_detection_sdk/src/widgets/state_animation.dart';
+import 'package:liveness_detection_sdk/src/widgets/face_overlay_painter.dart';
 import '../../liveness_sdk.dart';
-import '../widgets/state_animation.dart';
-import '../widgets/face_overlay_painter.dart';
-import '../models/liveness_result.dart';
-import '../models/liveness_state.dart';
 
 class LivenessCameraView extends StatefulWidget {
   final Function(LivenessResult) onResult;
@@ -42,13 +40,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   bool _isProcessing = false;
   bool _isSwitchingCamera = false;
 
-  List<LivenessState> get _progressStates => [
-        LivenessState.initial,
-        LivenessState.lookingLeft,
-        LivenessState.lookingRight,
-        LivenessState.lookingStraight,
-      ];
-
   @override
   void initState() {
     super.initState();
@@ -57,11 +48,13 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _initializeAnimationControllers() {
+    // Main face overlay animation
     _faceAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
 
+    // Individual state animations
     for (var state in LivenessState.values) {
       _stateAnimationControllers[state] = AnimationController(
         vsync: this,
@@ -103,10 +96,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       await _cameraController?.stopImageStream();
     }
 
-    // Dispose current controller
+    // Dispose current resources
     await _cameraController?.dispose();
     _livenessDetector?.dispose();
 
+    // Select appropriate camera
     final CameraDescription selectedCamera = _isFrontCamera
         ? _cameras!.firstWhere(
             (camera) => camera.lensDirection == CameraLensDirection.front,
@@ -142,7 +136,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         _isSwitchingCamera = false;
       });
 
-      // Reset state for new camera
       _resetState();
 
       // Add delay before starting image stream
@@ -155,14 +148,27 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
+  Future<void> _switchCamera() async {
+    if (_cameras == null ||
+        _cameras!.length < 2 ||
+        _isProcessing ||
+        _isSwitchingCamera) {
+      return;
+    }
+
+    setState(() {
+      _isFrontCamera = !_isFrontCamera;
+    });
+
+    await _setupCamera();
+  }
+
   void _resetState() {
     setState(() {
       _currentState = LivenessState.initial;
       _progress = 0.0;
       _instruction = "Position your face in the circle";
-      _currentAnimationPath = _isFrontCamera
-          ? 'assets/animations/face_scan_init.json'
-          : 'assets/animations/face_scan_init.json';
+      _currentAnimationPath = 'assets/animations/face_scan_init.json';
       _isProcessing = false;
     });
 
@@ -174,19 +180,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     // Restart the face animation controller
     _faceAnimationController.reset();
     _faceAnimationController.repeat(reverse: true);
-  }
-
-  Future<void> _switchCamera() async {
-    if (_cameras == null ||
-        _cameras!.length < 2 ||
-        _isProcessing ||
-        _isSwitchingCamera) return;
-
-    setState(() {
-      _isFrontCamera = !_isFrontCamera;
-    });
-
-    await _setupCamera();
   }
 
   void _processImage(CameraImage image) async {
@@ -305,6 +298,14 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
+  void _handleCancel() {
+    widget.onResult(LivenessResult(
+      isSuccess: false,
+      errorMessage: "Cancelled by user",
+    ));
+    Navigator.pop(context);
+  }
+
   Widget _buildCameraPreview() {
     if (!_isInitialized || _isSwitchingCamera) {
       return const Center(
@@ -359,20 +360,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
               right: 0,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: _progressStates.map((state) {
-                  final isCompleted = _getStateProgress(state) <= _progress;
-                  return Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: isCompleted
-                          ? Colors.green
-                          : Colors.white.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  );
-                }).toList(),
+                children: _buildProgressIndicators(),
               ),
             ),
             Positioned(
@@ -396,7 +384,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
                   color: Colors.white,
                   size: 30,
                 ),
-                onPressed: () => _handleCancel(),
+                onPressed: _handleCancel,
               ),
             ),
             if (_currentState == LivenessState.initial)
@@ -420,6 +408,28 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     );
   }
 
+  List<Widget> _buildProgressIndicators() {
+    final states = [
+      LivenessState.initial,
+      LivenessState.lookingLeft,
+      LivenessState.lookingRight,
+      LivenessState.lookingStraight,
+    ];
+
+    return states.map((state) {
+      final isCompleted = _getStateProgress(state) <= _progress;
+      return Container(
+        width: 40,
+        height: 4,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: isCompleted ? Colors.green : Colors.white.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(2),
+        ),
+      );
+    }).toList();
+  }
+
   double _getStateProgress(LivenessState state) {
     return switch (state) {
       LivenessState.initial => 0.0,
@@ -429,14 +439,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
     };
-  }
-
-  void _handleCancel() {
-    widget.onResult(LivenessResult(
-      isSuccess: false,
-      errorMessage: "Cancelled by user",
-    ));
-    Navigator.pop(context);
   }
 
   @override

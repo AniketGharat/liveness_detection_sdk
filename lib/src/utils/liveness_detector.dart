@@ -50,9 +50,14 @@ class LivenessDetector {
     }
     final bytes = allBytes.done().buffer.asUint8List();
 
+    // Adjust rotation and format based on camera type
+    final InputImageRotation rotation = isFrontCamera
+        ? InputImageRotation.rotation270deg
+        : InputImageRotation.rotation90deg;
+
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: InputImageRotation.rotation270deg,
+      rotation: rotation,
       format: InputImageFormat.bgra8888,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
@@ -87,7 +92,11 @@ class LivenessDetector {
   }
 
   Future<void> _processDetectedFace(Face face) async {
+    // Get the raw head euler angle
     var headEulerY = face.headEulerAngleY ?? 0.0;
+
+    // Adjust the angle based on camera type
+    // For back camera, we need to flip the sign of the angle
     if (!isFrontCamera) {
       headEulerY = -headEulerY;
     }
@@ -95,7 +104,6 @@ class LivenessDetector {
     final now = DateTime.now();
     _stateStartTime ??= now;
 
-    // Ensure minimum time between state changes
     if (_lastStateChange != null &&
         now.difference(_lastStateChange!) < const Duration(milliseconds: 500)) {
       return;
@@ -115,8 +123,12 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingLeft:
-        double threshold = isFrontCamera ? 30.0 : -30.0;
-        if (isFrontCamera ? headEulerY < -threshold : headEulerY > threshold) {
+        // Adjust threshold based on camera type
+        final threshold = config.turnThreshold;
+        final targetAngle = isFrontCamera ? -threshold : threshold;
+
+        if ((isFrontCamera && headEulerY < targetAngle) ||
+            (!isFrontCamera && headEulerY > targetAngle)) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
             _hasCompletedLeft = true;
@@ -129,8 +141,12 @@ class LivenessDetector {
         break;
 
       case LivenessState.lookingRight:
-        double threshold = isFrontCamera ? 30.0 : -30.0;
-        if (isFrontCamera ? headEulerY > threshold : headEulerY < -threshold) {
+        // Adjust threshold based on camera type
+        final threshold = config.turnThreshold;
+        final targetAngle = isFrontCamera ? threshold : -threshold;
+
+        if ((isFrontCamera && headEulerY > targetAngle) ||
+            (!isFrontCamera && headEulerY < targetAngle)) {
           _steadyFrameCount++;
           if (_steadyFrameCount >= requiredSteadyFrames &&
               !_hasCompletedRight) {
@@ -166,7 +182,8 @@ class LivenessDetector {
     }
     final eulerZ = face.headEulerAngleZ ?? 0.0;
 
-    return eulerY.abs() < 15.0 && eulerZ.abs() < 15.0;
+    return eulerY.abs() < config.straightThreshold &&
+        eulerZ.abs() < config.straightThreshold;
   }
 
   void _handleNoFace() {
@@ -236,6 +253,7 @@ class LivenessDetector {
   }
 
   String _getMessageForState(LivenessState state) {
+    // Adjust instructions based on camera type
     final leftRight = isFrontCamera ? ["left", "right"] : ["right", "left"];
     return switch (state) {
       LivenessState.initial => "Position your face in the circle",
@@ -248,10 +266,15 @@ class LivenessDetector {
   }
 
   String _getAnimationForState(LivenessState state) {
+    // Use the same animations but mirror them for back camera
     return switch (state) {
       LivenessState.initial => 'assets/animations/face_scan_init.json',
-      LivenessState.lookingLeft => 'assets/animations/look_left.json',
-      LivenessState.lookingRight => 'assets/animations/look_right.json',
+      LivenessState.lookingLeft => isFrontCamera
+          ? 'assets/animations/look_left.json'
+          : 'assets/animations/look_right.json',
+      LivenessState.lookingRight => isFrontCamera
+          ? 'assets/animations/look_right.json'
+          : 'assets/animations/look_left.json',
       LivenessState.lookingStraight => 'assets/animations/look_straight.json',
       LivenessState.complete => 'assets/animations/face_success.json',
       LivenessState.multipleFaces => 'assets/animations/multiple_faces.json',
