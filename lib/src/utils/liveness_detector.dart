@@ -18,10 +18,18 @@ class LivenessDetector {
   bool _hasCompletedLeft = false;
   bool _hasCompletedRight = false;
 
+  // New variables for improved state management
   DateTime? _stateStartTime;
   DateTime? _lastStateChange;
+  DateTime? _lastValidAngle;
   int _steadyFrameCount = 0;
-  static const int requiredSteadyFrames = 10;
+  double _lastEulerY = 0.0;
+
+  // Constants for validation
+  static const int requiredSteadyFrames = 15; // Increased from 10
+  static const Duration minStateTime = Duration(milliseconds: 1000);
+  static const Duration angleStabilityTime = Duration(milliseconds: 500);
+  static const double angleChangeTolerance = 5.0;
 
   LivenessDetector({
     required this.config,
@@ -50,7 +58,6 @@ class LivenessDetector {
     }
     final bytes = allBytes.done().buffer.asUint8List();
 
-    // Adjust rotation and format based on camera type
     final InputImageRotation rotation = isFrontCamera
         ? InputImageRotation.rotation270deg
         : InputImageRotation.rotation90deg;
@@ -92,11 +99,7 @@ class LivenessDetector {
   }
 
   Future<void> _processDetectedFace(Face face) async {
-    // Get the raw head euler angle
     var headEulerY = face.headEulerAngleY ?? 0.0;
-
-    // Adjust the angle based on camera type
-    // For back camera, we need to flip the sign of the angle
     if (!isFrontCamera) {
       headEulerY = -headEulerY;
     }
@@ -104,74 +107,104 @@ class LivenessDetector {
     final now = DateTime.now();
     _stateStartTime ??= now;
 
+    // Check if angle has changed significantly
+    if ((_lastEulerY - headEulerY).abs() > angleChangeTolerance) {
+      _lastValidAngle = now;
+      _steadyFrameCount = 0;
+    }
+    _lastEulerY = headEulerY;
+
+    // Ensure minimum time in state before transitions
     if (_lastStateChange != null &&
-        now.difference(_lastStateChange!) < const Duration(milliseconds: 500)) {
+        now.difference(_lastStateChange!) < minStateTime) {
       return;
     }
 
     switch (_currentState) {
       case LivenessState.initial:
-        if (_isFaceCentered(face)) {
-          _steadyFrameCount++;
-          if (_steadyFrameCount >= requiredSteadyFrames) {
-            _updateState(LivenessState.lookingLeft);
-            _steadyFrameCount = 0;
-          }
-        } else {
-          _steadyFrameCount = 0;
-        }
+        await _handleInitialState(face, headEulerY);
         break;
-
       case LivenessState.lookingLeft:
-        // Adjust threshold based on camera type
-        final threshold = config.turnThreshold;
-        final targetAngle = isFrontCamera ? -threshold : threshold;
-
-        if ((isFrontCamera && headEulerY > targetAngle) ||
-            (!isFrontCamera && headEulerY < targetAngle)) {
-          _steadyFrameCount++;
-          if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
-            _hasCompletedLeft = true;
-            _steadyFrameCount = 0;
-            _updateState(LivenessState.lookingRight);
-          }
-        } else {
-          _steadyFrameCount = 0;
-        }
+        await _handleLookingLeftState(face, headEulerY);
         break;
-
       case LivenessState.lookingRight:
-        // Adjust threshold based on camera type
-        final threshold = config.turnThreshold;
-        final targetAngle = isFrontCamera ? threshold : -threshold;
-
-        if ((isFrontCamera && headEulerY < targetAngle) ||
-            (!isFrontCamera && headEulerY > targetAngle)) {
-          _steadyFrameCount++;
-          if (_steadyFrameCount >= requiredSteadyFrames &&
-              !_hasCompletedRight) {
-            _hasCompletedRight = true;
-            _steadyFrameCount = 0;
-            _updateState(LivenessState.lookingStraight);
-          }
-        } else {
-          _steadyFrameCount = 0;
-        }
+        await _handleLookingRightState(face, headEulerY);
         break;
-
       case LivenessState.lookingStraight:
-        if (_isFaceCentered(face)) {
-          _stableFrameCount++;
-          if (_stableFrameCount >= requiredSteadyFrames) {
-            _updateState(LivenessState.complete);
-          }
-        } else {
-          _stableFrameCount = 0;
-        }
+        await _handleLookingStraightState(face);
         break;
-
       default:
         break;
+    }
+  }
+
+  Future<void> _handleInitialState(Face face, double headEulerY) async {
+    if (_isFaceCentered(face) && headEulerY.abs() < config.straightThreshold) {
+      _steadyFrameCount++;
+      if (_steadyFrameCount >= requiredSteadyFrames) {
+        _updateState(LivenessState.lookingLeft);
+        _steadyFrameCount = 0;
+        _lastValidAngle = null;
+      }
+    } else {
+      _steadyFrameCount = 0;
+    }
+  }
+
+  Future<void> _handleLookingLeftState(Face face, double headEulerY) async {
+    final threshold = config.turnThreshold;
+    final targetAngle = isFrontCamera ? -threshold : threshold;
+
+    // Check if head has turned left enough and held position
+    if ((isFrontCamera && headEulerY < targetAngle) ||
+        (!isFrontCamera && headEulerY > targetAngle)) {
+      if (_lastValidAngle != null &&
+          DateTime.now().difference(_lastValidAngle!) >= angleStabilityTime) {
+        _steadyFrameCount++;
+        if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
+          _hasCompletedLeft = true;
+          _updateState(LivenessState.lookingRight);
+          _steadyFrameCount = 0;
+          _lastValidAngle = null;
+        }
+      }
+    } else {
+      _steadyFrameCount = 0;
+      _lastValidAngle = null;
+    }
+  }
+
+  Future<void> _handleLookingRightState(Face face, double headEulerY) async {
+    final threshold = config.turnThreshold;
+    final targetAngle = isFrontCamera ? threshold : -threshold;
+
+    // Check if head has turned right enough and held position
+    if ((isFrontCamera && headEulerY > targetAngle) ||
+        (!isFrontCamera && headEulerY < targetAngle)) {
+      if (_lastValidAngle != null &&
+          DateTime.now().difference(_lastValidAngle!) >= angleStabilityTime) {
+        _steadyFrameCount++;
+        if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedRight) {
+          _hasCompletedRight = true;
+          _updateState(LivenessState.lookingStraight);
+          _steadyFrameCount = 0;
+          _lastValidAngle = null;
+        }
+      }
+    } else {
+      _steadyFrameCount = 0;
+      _lastValidAngle = null;
+    }
+  }
+
+  Future<void> _handleLookingStraightState(Face face) async {
+    if (_isFaceCentered(face)) {
+      _steadyFrameCount++;
+      if (_steadyFrameCount >= requiredSteadyFrames) {
+        _updateState(LivenessState.complete);
+      }
+    } else {
+      _steadyFrameCount = 0;
     }
   }
 
@@ -223,7 +256,23 @@ class LivenessDetector {
     _lastErrorTime = null;
     _stateStartTime = null;
     _lastStateChange = null;
+    _lastValidAngle = null;
+    _lastEulerY = 0.0;
     _updateState(LivenessState.initial);
+  }
+
+  void _updateState(LivenessState newState) {
+    if (_currentState == newState) return;
+
+    _currentState = newState;
+    _lastStateChange = DateTime.now();
+
+    onStateChanged(
+      newState,
+      _calculateProgress(newState),
+      _getMessageForState(newState),
+      _getAnimationForState(newState),
+    );
   }
 
   double _calculateProgress(LivenessState state) {
@@ -237,23 +286,7 @@ class LivenessDetector {
     };
   }
 
-  void _updateState(LivenessState newState) {
-    if (_currentState == newState) return;
-
-    _currentState = newState;
-    _lastStateChange = DateTime.now();
-
-    final progress = _calculateProgress(newState);
-    onStateChanged(
-      newState,
-      progress,
-      _getMessageForState(newState),
-      _getAnimationForState(newState),
-    );
-  }
-
   String _getMessageForState(LivenessState state) {
-    // Adjust instructions based on camera type
     final leftRight = isFrontCamera ? ["left", "right"] : ["right", "left"];
     return switch (state) {
       LivenessState.initial => "Position your face in the circle",
@@ -266,7 +299,6 @@ class LivenessDetector {
   }
 
   String _getAnimationForState(LivenessState state) {
-    // Use the same animations but mirror them for back camera
     return switch (state) {
       LivenessState.initial => 'assets/animations/face_scan_init.json',
       LivenessState.lookingLeft => isFrontCamera
