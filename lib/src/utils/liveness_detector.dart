@@ -146,12 +146,10 @@ class LivenessDetector {
     }
 
     // Contour variation check
-    // Inside _isRealFace method, replace the contour processing section:
     if (_lastContourCheck == null ||
         now.difference(_lastContourCheck!) >= _contourCheckInterval) {
       final faceContour = face.contours[FaceContourType.face]?.points;
       if (faceContour != null && faceContour.isNotEmpty) {
-        // Convert points to double list explicitly
         final currentContours =
             faceContour.map((point) => (point.x + point.y).toDouble()).toList();
 
@@ -250,8 +248,8 @@ class LivenessDetector {
     final targetAngle =
         isFrontCamera ? -config.turnThreshold : config.turnThreshold;
 
-    if ((isFrontCamera && headEulerY >= targetAngle) ||
-        (!isFrontCamera && headEulerY <= targetAngle)) {
+    if ((isFrontCamera && headEulerY <= targetAngle) ||
+        (!isFrontCamera && headEulerY >= targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
         _stableFrameCount++;
@@ -272,8 +270,8 @@ class LivenessDetector {
     final targetAngle =
         isFrontCamera ? config.turnThreshold : -config.turnThreshold;
 
-    if ((isFrontCamera && headEulerY <= targetAngle) ||
-        (!isFrontCamera && headEulerY >= targetAngle)) {
+    if ((isFrontCamera && headEulerY >= targetAngle) ||
+        (!isFrontCamera && headEulerY <= targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
         _stableFrameCount++;
@@ -369,64 +367,56 @@ class LivenessDetector {
     _lastBlinkTime = null;
     _lastFaceContours = null;
     _lastContourCheck = null;
-    _updateState(LivenessState.initial);
   }
 
-  void _updateState(LivenessState newState) {
-    if (_currentState == newState) return;
-
-    _currentState = newState;
+  void _updateState(LivenessState state) {
+    _currentState = state;
     _lastStateChange = DateTime.now();
-
     onStateChanged(
-      newState,
-      _calculateProgress(newState),
-      _getMessageForState(newState),
-      _getAnimationForState(newState),
+      state,
+      _stableFrameCount.toDouble(),
+      _getStateMessage(state),
+      _getAnimationForState(state),
     );
   }
 
-  double _calculateProgress(LivenessState state) {
-    return switch (state) {
-      LivenessState.initial => 0.0,
-      LivenessState.lookingLeft => 0.25,
-      LivenessState.lookingRight => 0.50,
-      LivenessState.lookingStraight => 0.75,
-      LivenessState.complete => 1.0,
-      LivenessState.multipleFaces => 0.0,
-    };
+  String _getStateMessage(LivenessState state) {
+    switch (state) {
+      case LivenessState.lookingLeft:
+        return "Please look left";
+      case LivenessState.lookingRight:
+        return "Please look right";
+      case LivenessState.lookingStraight:
+        return "Please look straight";
+      case LivenessState.complete:
+        return "Liveness check complete!";
+      case LivenessState.initial:
+      default:
+        return "Please look at the camera";
+    }
   }
 
-  String _getMessageForState(LivenessState state) {
-    final leftRight = isFrontCamera ? ["left", "right"] : ["right", "left"];
-    return switch (state) {
-      LivenessState.initial => "Position your face in the circle",
-      LivenessState.lookingLeft => "Turn your head ${leftRight[0]} slowly",
-      LivenessState.lookingRight => "Turn your head ${leftRight[1]} slowly",
-      LivenessState.lookingStraight => "Look straight ahead",
-      LivenessState.complete => "Perfect! Processing...",
-      LivenessState.multipleFaces => "Multiple faces detected",
-    };
-  }
-
-  // Get animation path for current state
   String _getAnimationForState(LivenessState state) {
-    return switch (state) {
-      LivenessState.initial => 'assets/animations/face_scan_init.json',
-      LivenessState.lookingLeft => isFrontCamera
-          ? 'assets/animations/look_left.json'
-          : 'assets/animations/look_right.json',
-      LivenessState.lookingRight => isFrontCamera
-          ? 'assets/animations/look_right.json'
-          : 'assets/animations/look_left.json',
-      LivenessState.lookingStraight => 'assets/animations/look_straight.json',
-      LivenessState.complete => 'assets/animations/face_success.json',
-      LivenessState.multipleFaces => 'assets/animations/multiple_faces.json',
-    };
+    switch (state) {
+      case LivenessState.lookingLeft:
+        return 'left';
+      case LivenessState.lookingRight:
+        return 'right';
+      case LivenessState.lookingStraight:
+        return 'straight';
+      case LivenessState.complete:
+        return 'complete';
+      default:
+        return 'initial';
+    }
   }
+}
 
-  // Clean up resources
-  void dispose() {
-    _faceDetector.close();
-  }
+enum LivenessState {
+  initial,
+  lookingLeft,
+  lookingRight,
+  lookingStraight,
+  complete,
+  multipleFaces,
 }
