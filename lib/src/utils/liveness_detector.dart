@@ -156,8 +156,8 @@ class LivenessDetector {
     final targetAngle = isFrontCamera ? -threshold : threshold;
 
     // Check if head has turned left enough and held position
-    if ((isFrontCamera && headEulerY < targetAngle) ||
-        (!isFrontCamera && headEulerY > targetAngle)) {
+    if ((isFrontCamera && headEulerY > targetAngle) ||
+        (!isFrontCamera && headEulerY < targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= angleStabilityTime) {
         _steadyFrameCount++;
@@ -179,8 +179,8 @@ class LivenessDetector {
     final targetAngle = isFrontCamera ? threshold : -threshold;
 
     // Check if head has turned right enough and held position
-    if ((isFrontCamera && headEulerY > targetAngle) ||
-        (!isFrontCamera && headEulerY < targetAngle)) {
+    if ((isFrontCamera && headEulerY < targetAngle) ||
+        (!isFrontCamera && headEulerY > targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= angleStabilityTime) {
         _steadyFrameCount++;
