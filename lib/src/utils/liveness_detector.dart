@@ -5,7 +5,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:liveness_detection_sdk/liveness_sdk.dart';
 
 class LivenessDetector {
-  // Core configuration and callback
+  // Core configuration
   final LivenessConfig config;
   final Function(LivenessState, double, String, String) onStateChanged;
   final bool isFrontCamera;
@@ -22,37 +22,27 @@ class LivenessDetector {
   bool _hasCompletedLeft = false;
   bool _hasCompletedRight = false;
 
-  // Timing management
+  // Time tracking
   DateTime? _stateStartTime;
   DateTime? _lastStateChange;
   DateTime? _lastValidAngle;
-  int _steadyFrameCount = 0;
   double _lastEulerY = 0.0;
 
-  // Spoof detection fields
+  // Spoof detection tracking
   double? _lastBlinkScore;
   DateTime? _lastBlinkTime;
   List<double>? _lastFaceContours;
   DateTime? _lastContourCheck;
   int _staticFrameCount = 0;
 
-  // Constants for validation
-  static const int requiredSteadyFrames = 12; // Reduced from 15
-  static const Duration minStateTime =
-      Duration(milliseconds: 800); // Reduced from 1000
-  static const Duration angleStabilityTime =
-      Duration(milliseconds: 400); // Reduced from 500
-  static const double angleChangeTolerance = 3.0; // Reduced from 5.0
-
   // Constants for spoof detection
-  static const double _minBlinkThreshold = 0.05;
-  static const double _maxBlinkThreshold = 0.9;
-  static const Duration _contourCheckInterval = Duration(milliseconds: 400);
-  static const double _contourVariationThreshold = 0.01;
-  static const int _maxStaticFrames = 20;
-  static const Duration _blinkTimeout = Duration(seconds: 5);
+  static const double _minBlinkThreshold = 0.1;
+  static const double _maxBlinkThreshold = 0.85;
+  static const Duration _contourCheckInterval = Duration(milliseconds: 300);
+  static const double _contourVariationThreshold = 0.015;
+  static const int _maxStaticFrames = 15;
+  static const Duration _blinkTimeout = Duration(seconds: 4);
 
-  // Constructor
   LivenessDetector({
     required this.config,
     required this.onStateChanged,
@@ -62,7 +52,6 @@ class LivenessDetector {
     _updateState(LivenessState.initial);
   }
 
-  // Initialize face detector
   void _initializeFaceDetector() {
     final options = FaceDetectorOptions(
       enableLandmarks: true,
@@ -74,7 +63,6 @@ class LivenessDetector {
     _faceDetector = FaceDetector(options: options);
   }
 
-  // Convert camera image to ML Kit format
   Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
     final WriteBuffer allBytes = WriteBuffer();
     for (final Plane plane in image.planes) {
@@ -99,7 +87,6 @@ class LivenessDetector {
     );
   }
 
-  // Main processing pipeline
   Future<void> processImage(CameraImage image) async {
     if (_isProcessing || _currentState == LivenessState.complete) return;
     _isProcessing = true;
@@ -123,16 +110,90 @@ class LivenessDetector {
     }
   }
 
-  // Process a single detected face
-  Future<void> _processDetectedFace(Face face) async {
-    if (!_isRealFace(face)) {
-      debugPrint('Spoof detection triggered - not a real face');
-      _handleSpoofingAttempt();
-      return;
+  bool _isRealFace(Face face) {
+    final now = DateTime.now();
+    bool isLikelyReal = true;
+
+    // Initial blink check
+    if (_lastBlinkTime == null) {
+      if (face.leftEyeOpenProbability != null &&
+          face.rightEyeOpenProbability != null) {
+        final blinkScore =
+            (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2;
+        if (blinkScore < _maxBlinkThreshold) {
+          _lastBlinkTime = now;
+        } else {
+          return false;
+        }
+      }
     }
 
-    if (_currentState == LivenessState.multipleFaces) {
-      _resetProgress();
+    // Continuous blink detection
+    if (face.leftEyeOpenProbability != null &&
+        face.rightEyeOpenProbability != null) {
+      final blinkScore =
+          (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2;
+
+      if (_lastBlinkScore != null) {
+        final blinkDelta = (_lastBlinkScore! - blinkScore).abs();
+        if (blinkDelta > _minBlinkThreshold &&
+            blinkScore < _maxBlinkThreshold) {
+          _lastBlinkTime = now;
+          _staticFrameCount = 0;
+        }
+      }
+      _lastBlinkScore = blinkScore;
+    }
+
+    // Contour variation check
+    // Inside _isRealFace method, replace the contour processing section:
+    if (_lastContourCheck == null ||
+        now.difference(_lastContourCheck!) >= _contourCheckInterval) {
+      final faceContour = face.contours[FaceContourType.face]?.points;
+      if (faceContour != null && faceContour.isNotEmpty) {
+        // Convert points to double list explicitly
+        final currentContours =
+            faceContour.map((point) => (point.x + point.y).toDouble()).toList();
+
+        if (_lastFaceContours != null &&
+            _lastFaceContours!.length == currentContours.length) {
+          final variations = List.generate(
+            currentContours.length,
+            (i) => (currentContours[i] - _lastFaceContours![i]).abs(),
+          );
+
+          final averageVariation = variations.isNotEmpty
+              ? variations.reduce((a, b) => a + b) / variations.length
+              : 0.0;
+
+          if (averageVariation < _contourVariationThreshold) {
+            _staticFrameCount++;
+          } else {
+            _staticFrameCount =
+                (_staticFrameCount - 1).clamp(0, _maxStaticFrames);
+          }
+        }
+
+        _lastFaceContours = currentContours;
+        _lastContourCheck = now;
+      }
+    }
+
+    final hasRecentBlink = _lastBlinkTime != null &&
+        now.difference(_lastBlinkTime!) < _blinkTimeout;
+    final isExcessivelyStatic = _staticFrameCount > _maxStaticFrames;
+
+    if (!hasRecentBlink || isExcessivelyStatic) {
+      isLikelyReal = false;
+    }
+
+    return isLikelyReal;
+  }
+
+  Future<void> _processDetectedFace(Face face) async {
+    if (!_isRealFace(face)) {
+      _handleSpoofingAttempt();
+      return;
     }
 
     var headEulerY = face.headEulerAngleY ?? 0.0;
@@ -143,17 +204,14 @@ class LivenessDetector {
     final now = DateTime.now();
     _stateStartTime ??= now;
 
-    if ((_lastEulerY - headEulerY).abs() > angleChangeTolerance) {
+    if ((_lastEulerY - headEulerY).abs() > config.straightThreshold) {
       _lastValidAngle = now;
-      _steadyFrameCount = 0;
       _staticFrameCount = 0;
-    } else {
-      _staticFrameCount++;
     }
     _lastEulerY = headEulerY;
 
     if (_lastStateChange != null &&
-        now.difference(_lastStateChange!) < minStateTime) {
+        now.difference(_lastStateChange!) < config.phaseDuration) {
       return;
     }
 
@@ -175,144 +233,74 @@ class LivenessDetector {
     }
   }
 
-  // Improved spoof detection
-  bool _isRealFace(Face face) {
-    final now = DateTime.now();
-    bool isLikelyReal = true;
-
-    // Blink detection
-    if (face.leftEyeOpenProbability != null &&
-        face.rightEyeOpenProbability != null) {
-      final blinkScore =
-          (face.leftEyeOpenProbability! + face.rightEyeOpenProbability!) / 2;
-
-      if (_lastBlinkScore != null) {
-        final blinkDelta = (_lastBlinkScore! - blinkScore).abs();
-        if (blinkDelta > _minBlinkThreshold &&
-            blinkScore < _maxBlinkThreshold) {
-          _lastBlinkTime = now;
-          _staticFrameCount = 0;
-        }
-      }
-      _lastBlinkScore = blinkScore;
-    }
-
-    // Contour variation check
-    if (_lastContourCheck == null ||
-        now.difference(_lastContourCheck!) >= _contourCheckInterval) {
-      final faceContour = face.contours[FaceContourType.face]?.points;
-      if (faceContour != null && faceContour.isNotEmpty) {
-        final currentContours =
-            faceContour.map((point) => (point.x + point.y)).toList();
-
-        if (_lastFaceContours != null &&
-            _lastFaceContours!.length == currentContours.length) {
-          final variations = List.generate(currentContours.length,
-              (i) => (currentContours[i] - _lastFaceContours![i]).abs());
-
-          final averageVariation = variations.isNotEmpty
-              ? variations.reduce((a, b) => a + b) / variations.length
-              : 0.0;
-
-          if (averageVariation < _contourVariationThreshold) {
-            _staticFrameCount++;
-          } else {
-            _staticFrameCount =
-                (_staticFrameCount - 1).clamp(0, _maxStaticFrames);
-          }
-        }
-
-        _lastFaceContours = currentContours.cast<double>();
-        _lastContourCheck = now;
-      }
-    }
-
-    final hasRecentBlink = _lastBlinkTime != null &&
-        now.difference(_lastBlinkTime!) < _blinkTimeout;
-    final isExcessivelyStatic = _staticFrameCount > _maxStaticFrames;
-
-    if (!hasRecentBlink && isExcessivelyStatic) {
-      isLikelyReal = false;
-    }
-
-    debugPrint(
-        'Liveness Stats - Blink: $hasRecentBlink, Static: $_staticFrameCount, Real: $isLikelyReal');
-    return isLikelyReal;
-  }
-
-  // Handle initial face positioning
   Future<void> _handleInitialState(Face face, double headEulerY) async {
     if (_isFaceCentered(face) && headEulerY.abs() < config.straightThreshold) {
-      _steadyFrameCount++;
-      if (_steadyFrameCount >= requiredSteadyFrames) {
+      _stableFrameCount++;
+      if (_stableFrameCount >= config.requiredFrames) {
         _updateState(LivenessState.lookingLeft);
-        _steadyFrameCount = 0;
+        _stableFrameCount = 0;
         _lastValidAngle = null;
       }
     } else {
-      _steadyFrameCount = 0;
+      _stableFrameCount = 0;
     }
   }
 
-  // Handle left turn state
   Future<void> _handleLookingLeftState(Face face, double headEulerY) async {
-    final threshold = config.turnThreshold;
-    final targetAngle = isFrontCamera ? -threshold : threshold;
+    final targetAngle =
+        isFrontCamera ? -config.turnThreshold : config.turnThreshold;
 
     if ((isFrontCamera && headEulerY <= targetAngle) ||
         (!isFrontCamera && headEulerY >= targetAngle)) {
       if (_lastValidAngle != null &&
-          DateTime.now().difference(_lastValidAngle!) >= angleStabilityTime) {
-        _steadyFrameCount++;
-        if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedLeft) {
+          DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
+        _stableFrameCount++;
+        if (_stableFrameCount >= config.requiredFrames && !_hasCompletedLeft) {
           _hasCompletedLeft = true;
           _updateState(LivenessState.lookingRight);
-          _steadyFrameCount = 0;
+          _stableFrameCount = 0;
           _lastValidAngle = null;
         }
       }
     } else {
-      _steadyFrameCount = 0;
+      _stableFrameCount = 0;
       _lastValidAngle = null;
     }
   }
 
-  // Handle right turn state
   Future<void> _handleLookingRightState(Face face, double headEulerY) async {
-    final threshold = config.turnThreshold;
-    final targetAngle = isFrontCamera ? threshold : -threshold;
+    final targetAngle =
+        isFrontCamera ? config.turnThreshold : -config.turnThreshold;
 
     if ((isFrontCamera && headEulerY >= targetAngle) ||
         (!isFrontCamera && headEulerY <= targetAngle)) {
       if (_lastValidAngle != null &&
-          DateTime.now().difference(_lastValidAngle!) >= angleStabilityTime) {
-        _steadyFrameCount++;
-        if (_steadyFrameCount >= requiredSteadyFrames && !_hasCompletedRight) {
+          DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
+        _stableFrameCount++;
+        if (_stableFrameCount >= config.requiredFrames && !_hasCompletedRight) {
           _hasCompletedRight = true;
           _updateState(LivenessState.lookingStraight);
-          _steadyFrameCount = 0;
+          _stableFrameCount = 0;
           _lastValidAngle = null;
         }
       }
     } else {
-      _steadyFrameCount = 0;
+      _stableFrameCount = 0;
       _lastValidAngle = null;
     }
   }
 
-  // Handle final straight look state
   Future<void> _handleLookingStraightState(Face face) async {
     if (_isFaceCentered(face)) {
-      _steadyFrameCount++;
-      if (_steadyFrameCount >= requiredSteadyFrames) {
+      _stableFrameCount++;
+      if (_stableFrameCount >= config.requiredFrames) {
         _updateState(LivenessState.complete);
       }
     } else {
-      _steadyFrameCount = 0;
+      _stableFrameCount = 0;
     }
   }
 
-  // Check if face is centered
   bool _isFaceCentered(Face face) {
     var eulerY = face.headEulerAngleY ?? 0.0;
     if (!isFrontCamera) {
@@ -324,7 +312,6 @@ class LivenessDetector {
         eulerZ.abs() < config.straightThreshold;
   }
 
-  // Handle no face detected
   void _handleNoFace() {
     if (_currentState != LivenessState.initial) {
       _updateState(LivenessState.initial);
@@ -332,7 +319,6 @@ class LivenessDetector {
     _incrementErrorCount();
   }
 
-  // Handle multiple faces
   void _handleMultipleFaces() {
     if (_currentState != LivenessState.multipleFaces) {
       _updateState(LivenessState.multipleFaces);
@@ -340,7 +326,6 @@ class LivenessDetector {
     _incrementErrorCount();
   }
 
-  // Handle spoofing attempt
   void _handleSpoofingAttempt() {
     _resetProgress();
     onStateChanged(
@@ -351,13 +336,10 @@ class LivenessDetector {
     );
   }
 
-  // Handle errors
   void _handleError() {
     _incrementErrorCount();
-    debugPrint('Error handled: $_consecutiveErrors consecutive errors');
   }
 
-  // Error counting
   void _incrementErrorCount() {
     final now = DateTime.now();
     if (_lastErrorTime != null &&
@@ -372,10 +354,8 @@ class LivenessDetector {
     }
   }
 
-  // Reset all progress
   void _resetProgress() {
     _stableFrameCount = 0;
-    _steadyFrameCount = 0;
     _hasCompletedLeft = false;
     _hasCompletedRight = false;
     _consecutiveErrors = 0;
@@ -392,7 +372,6 @@ class LivenessDetector {
     _updateState(LivenessState.initial);
   }
 
-  // Update state
   void _updateState(LivenessState newState) {
     if (_currentState == newState) return;
 
@@ -407,7 +386,6 @@ class LivenessDetector {
     );
   }
 
-  // Calculate progress percentage
   double _calculateProgress(LivenessState state) {
     return switch (state) {
       LivenessState.initial => 0.0,
@@ -419,7 +397,6 @@ class LivenessDetector {
     };
   }
 
-  // Get user instruction message for current state
   String _getMessageForState(LivenessState state) {
     final leftRight = isFrontCamera ? ["left", "right"] : ["right", "left"];
     return switch (state) {
@@ -428,7 +405,7 @@ class LivenessDetector {
       LivenessState.lookingRight => "Turn your head ${leftRight[1]} slowly",
       LivenessState.lookingStraight => "Look straight ahead",
       LivenessState.complete => "Perfect! Processing...",
-      LivenessState.multipleFaces => "Only one face should be visible",
+      LivenessState.multipleFaces => "Multiple faces detected",
     };
   }
 
