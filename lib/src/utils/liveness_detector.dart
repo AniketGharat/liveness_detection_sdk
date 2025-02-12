@@ -250,8 +250,8 @@ class LivenessDetector {
     final targetAngle =
         isFrontCamera ? -config.turnThreshold : config.turnThreshold;
 
-    if ((isFrontCamera && headEulerY <= targetAngle) ||
-        (!isFrontCamera && headEulerY >= targetAngle)) {
+    if ((isFrontCamera && headEulerY >= targetAngle) ||
+        (!isFrontCamera && headEulerY <= targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
         _stableFrameCount++;
@@ -272,8 +272,8 @@ class LivenessDetector {
     final targetAngle =
         isFrontCamera ? config.turnThreshold : -config.turnThreshold;
 
-    if ((isFrontCamera && headEulerY >= targetAngle) ||
-        (!isFrontCamera && headEulerY <= targetAngle)) {
+    if ((isFrontCamera && headEulerY <= targetAngle) ||
+        (!isFrontCamera && headEulerY >= targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
         _stableFrameCount++;
