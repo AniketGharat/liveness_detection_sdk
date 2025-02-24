@@ -445,6 +445,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       LivenessState.lookingStraight => 0.75,
       LivenessState.complete => 1.0,
       LivenessState.multipleFaces => 0.0,
+      LivenessState.failed => 0.0, // Added case for failed state
     };
   }
 
