@@ -410,16 +410,20 @@ class LivenessDetector {
 
   String _getAnimationForState(LivenessState state) {
     switch (state) {
+      case LivenessState.initial:
+        return 'assets/animations/face_scan_init.json';
       case LivenessState.lookingLeft:
-        return 'left';
+        return 'assets/animations/look_left.json';
       case LivenessState.lookingRight:
-        return 'right';
+        return 'assets/animations/look_right.json';
       case LivenessState.lookingStraight:
-        return 'straight';
+        return 'assets/animations/look_straight.json';
       case LivenessState.complete:
-        return 'complete';
+        return 'assets/animations/face_success.json';
+      case LivenessState.multipleFaces:
+        return 'assets/animations/multiple_faces.json';
       default:
-        return 'initial';
+        return 'assets/animations/face_scan_init.json';
     }
   }
 }
