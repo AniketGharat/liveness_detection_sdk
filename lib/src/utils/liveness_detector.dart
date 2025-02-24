@@ -213,13 +213,13 @@ class LivenessDetector {
   bool _isValidLeftTurn(double headEulerY) {
     final threshold =
         isFrontCamera ? config.turnThreshold : -config.turnThreshold;
-    return isFrontCamera ? headEulerY >= threshold : headEulerY <= threshold;
+    return isFrontCamera ? headEulerY >= threshold : headEulerY >= threshold;
   }
 
   bool _isValidRightTurn(double headEulerY) {
     final threshold =
         isFrontCamera ? -config.turnThreshold : config.turnThreshold;
-    return isFrontCamera ? headEulerY <= threshold : headEulerY >= threshold;
+    return isFrontCamera ? headEulerY <= threshold : headEulerY <= threshold;
   }
 
   bool _isFaceStraight(double headEulerY) {
