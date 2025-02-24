@@ -35,37 +35,23 @@ class FaceOverlayPainter extends CustomPainter {
       ..strokeWidth = 3;
     canvas.drawCircle(center, radius, circlePaint);
 
-    // Calculate number of completed quarters (each quarter represents 0.25 progress)
-    final completeQuarters = (progress / 0.25).floor();
-    final remainingProgress = progress % 0.25;
-    final remainingAngle = (remainingProgress / 0.25) * (pi / 2);
+    // Calculate the angle based on progress
+    final totalProgressAngle =
+        progress * 2 * pi; // 0.25 for 1/4, 0.5 for 1/2, etc.
 
-    // Paint complete quarters in green
+    // Paint progress
     final progressPaint = Paint()
       ..color = Colors.green
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4;
 
-    for (var i = 0; i < completeQuarters; i++) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        -pi / 2 + (i * pi / 2),
-        pi / 2,
-        false,
-        progressPaint,
-      );
-    }
-
-    // Paint the remaining quarter if there's any
-    if (completeQuarters < 4) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        -pi / 2 + (completeQuarters * pi / 2),
-        remainingAngle,
-        false,
-        progressPaint,
-      );
-    }
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -pi / 2, // Start from the top of the circle
+      totalProgressAngle,
+      false,
+      progressPaint,
+    );
 
     // Draw guidelines (cross lines)
     final guidelinePaint = Paint()
