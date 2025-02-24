@@ -22,7 +22,7 @@ class FaceOverlayPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
-    // Draw base white circle
+    // Draw base circle
     final circlePaint = Paint()
       ..color = Colors.white.withOpacity(0.8)
       ..style = PaintingStyle.stroke
@@ -36,12 +36,13 @@ class FaceOverlayPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3;
 
-      // Calculate which quarter we're in
-      final quarterProgress = (progress * 4).floor();
-      final currentQuarterProgress = (progress * 4) % 1;
+      // Calculate number of complete quarters (0.25 each)
+      final completeQuarters = (progress / 0.25).floor();
+      final remainingProgress = progress % 0.25;
+      final remainingAngle = (remainingProgress / 0.25) * (pi / 2);
 
       // Draw completed quarters
-      for (var i = 0; i < quarterProgress; i++) {
+      for (var i = 0; i < completeQuarters; i++) {
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: radius),
           -pi / 2 + (i * pi / 2),
@@ -51,16 +52,26 @@ class FaceOverlayPainter extends CustomPainter {
         );
       }
 
-      // Draw current quarter progress
-      if (quarterProgress < 4) {
+      // Draw partial progress in current quarter
+      if (completeQuarters < 4) {
         canvas.drawArc(
           Rect.fromCircle(center: center, radius: radius),
-          -pi / 2 + (quarterProgress * pi / 2),
-          pi / 2 * currentQuarterProgress,
+          -pi / 2 + (completeQuarters * pi / 2),
+          remainingAngle,
           false,
           progressPaint,
         );
       }
+    }
+
+    // Add error indication for multiple faces
+    if (state == LivenessState.multipleFaces) {
+      final errorPaint = Paint()
+        ..color = Colors.red.withOpacity(0.8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3;
+
+      canvas.drawCircle(center, radius, errorPaint);
     }
   }
 
