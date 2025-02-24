@@ -1,5 +1,4 @@
 import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:liveness_detection_sdk/liveness_sdk.dart';
@@ -20,7 +19,14 @@ class FaceOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width * (circleSize / 2);
+    final radius = circleSize / 2;
+
+    // Draw outer reference circle
+    final outerCirclePaint = Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawCircle(center, radius + 10, outerCirclePaint);
 
     // Draw base circle
     final circlePaint = Paint()
@@ -64,6 +70,26 @@ class FaceOverlayPainter extends CustomPainter {
       }
     }
 
+    // Draw guidelines
+    final guidelinePaint = Paint()
+      ..color = Colors.white.withOpacity(0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    // Vertical guideline
+    canvas.drawLine(
+      Offset(center.dx, center.dy - radius - 20),
+      Offset(center.dx, center.dy + radius + 20),
+      guidelinePaint,
+    );
+
+    // Horizontal guideline
+    canvas.drawLine(
+      Offset(center.dx - radius - 20, center.dy),
+      Offset(center.dx + radius + 20, center.dy),
+      guidelinePaint,
+    );
+
     // Add error indication for multiple faces
     if (state == LivenessState.multipleFaces) {
       final errorPaint = Paint()
@@ -73,6 +99,19 @@ class FaceOverlayPainter extends CustomPainter {
 
       canvas.drawCircle(center, radius, errorPaint);
     }
+
+    // Draw animation effect
+    final animationProgress = animation.value;
+    final animationPaint = Paint()
+      ..color = Colors.white.withOpacity(0.2 * (1 - animationProgress))
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    canvas.drawCircle(
+      center,
+      radius + (20 * animationProgress),
+      animationPaint,
+    );
   }
 
   @override
