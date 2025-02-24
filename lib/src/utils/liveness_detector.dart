@@ -410,7 +410,7 @@ class LivenessDetector {
     _incrementErrorCount();
     if (_consecutiveErrors > config.maxConsecutiveErrors) {
       _resetProgress();
-      _updateState(LivenessState.error);
+      _updateState(LivenessState.failed);
     }
   }
 
@@ -472,7 +472,7 @@ class LivenessDetector {
         return "Verification complete";
       case LivenessState.multipleFaces:
         return "Multiple faces detected";
-      case LivenessState.error:
+      case LivenessState.failed:
         return "Error during verification";
       default:
         return "";
@@ -494,7 +494,7 @@ class LivenessDetector {
         return "Liveness verification completed successfully";
       case LivenessState.multipleFaces:
         return "Please ensure only one face is visible";
-      case LivenessState.error:
+      case LivenessState.failed:
         return "Please try again";
       default:
         return "";
