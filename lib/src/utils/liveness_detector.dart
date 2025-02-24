@@ -111,8 +111,7 @@ class LivenessDetector {
     // Get raw euler Y angle
     double rawEulerY = face.headEulerAngleY ?? 0.0;
 
-    // Apply camera-specific transformations
-    double headEulerY = isFrontCamera ? rawEulerY : -rawEulerY;
+    double headEulerY = rawEulerY;
 
     final now = DateTime.now();
     _stateStartTime ??= now;
@@ -211,15 +210,23 @@ class LivenessDetector {
 
   // Angle validation functions
   bool _isValidLeftTurn(double headEulerY) {
-    final threshold =
-        isFrontCamera ? config.turnThreshold : -config.turnThreshold;
-    return isFrontCamera ? headEulerY >= threshold : headEulerY <= threshold;
+    final threshold = config.turnThreshold;
+    if (isFrontCamera) {
+      return headEulerY >= threshold;
+    } else {
+      // For back camera, we need to check the opposite direction
+      return headEulerY <= -threshold;
+    }
   }
 
   bool _isValidRightTurn(double headEulerY) {
-    final threshold =
-        isFrontCamera ? -config.turnThreshold : config.turnThreshold;
-    return isFrontCamera ? headEulerY <= threshold : headEulerY >= threshold;
+    final threshold = config.turnThreshold;
+    if (isFrontCamera) {
+      return headEulerY <= -threshold;
+    } else {
+      // For back camera, we need to check the opposite direction
+      return headEulerY >= threshold;
+    }
   }
 
   bool _isFaceStraight(double headEulerY) {
