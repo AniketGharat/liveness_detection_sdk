@@ -244,22 +244,38 @@ class LivenessDetector {
     _lastStateChange = DateTime.now();
     _stableFrameCount = 0;
 
-    // Update state progress based on state
+    // Update state progress cumulatively based on state progression
     switch (newState) {
       case LivenessState.initial:
-        _stateProgress[LivenessState.initial] = 1.0; // Mark as completed
+        _stateProgress[LivenessState.initial] = 1.0;
         break;
       case LivenessState.lookingLeft:
-        _stateProgress[LivenessState.lookingLeft] = 1.0; // Mark as completed
+        _stateProgress[LivenessState.initial] = 1.0;
+        _stateProgress[LivenessState.lookingLeft] = 1.0;
         break;
       case LivenessState.lookingRight:
-        _stateProgress[LivenessState.lookingRight] = 1.0; // Mark as completed
+        _stateProgress[LivenessState.initial] = 1.0;
+        _stateProgress[LivenessState.lookingLeft] = 1.0;
+        _stateProgress[LivenessState.lookingRight] = 1.0;
         break;
       case LivenessState.lookingStraight:
-        _stateProgress[LivenessState.lookingStraight] =
-            1.0; // Mark as completed
+        _stateProgress[LivenessState.initial] = 1.0;
+        _stateProgress[LivenessState.lookingLeft] = 1.0;
+        _stateProgress[LivenessState.lookingRight] = 1.0;
+        _stateProgress[LivenessState.lookingStraight] = 1.0;
         break;
-      default:
+      case LivenessState.complete:
+        // Mark all states as complete
+        _stateProgress.forEach((state, _) {
+          _stateProgress[state] = 1.0;
+        });
+        break;
+      case LivenessState.failed:
+      case LivenessState.multipleFaces:
+        // Reset progress for error states
+        _stateProgress.forEach((state, _) {
+          _stateProgress[state] = 0.0;
+        });
         break;
     }
 
@@ -272,6 +288,12 @@ class LivenessDetector {
   }
 
   double calculateTotalProgress() {
+    if (_currentState == LivenessState.failed ||
+        _currentState == LivenessState.multipleFaces) {
+      return 0.0;
+    }
+
+    // Calculate progress based on completed states
     double total = 0.0;
     if (_stateProgress[LivenessState.initial]! >= 1.0) total += 0.25;
     if (_stateProgress[LivenessState.lookingLeft]! >= 1.0) total += 0.25;
