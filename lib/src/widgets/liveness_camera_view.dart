@@ -123,12 +123,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     try {
       await _cameraController!.initialize();
 
+      // In your LivenessCameraView, make sure you're properly passing the progress:
       _livenessDetector = LivenessDetector(
         config: widget.config,
-        onStateChanged: _handleStateChanged,
+        onStateChanged: (state, progress, message, instructions) {
+          setState(() {
+            _progress = progress; // Make sure this is being set
+          });
+        },
         isFrontCamera: _isFrontCamera,
       );
-
       if (!mounted) return;
 
       setState(() {

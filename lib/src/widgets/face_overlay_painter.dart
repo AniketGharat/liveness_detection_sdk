@@ -40,7 +40,20 @@ class FaceOverlayPainter extends CustomPainter {
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3;
+        ..strokeWidth = 4;
+
+      final progressAngle = progress * 2 * pi;
+
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -pi / 2, // Start from top
+        progressAngle,
+        false,
+        progressPaint,
+      );
+
+      // Debug progress
+      debugPrint('Drawing progress: $progress, Angle: $progressAngle');
 
       // Calculate number of complete quarters (0.25 each)
       final completeQuarters = (progress / 0.25).floor();

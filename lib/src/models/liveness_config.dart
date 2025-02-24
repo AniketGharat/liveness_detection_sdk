@@ -9,11 +9,11 @@ class LivenessConfig {
 
   const LivenessConfig({
     this.straightThreshold = 15.0,
-    this.turnThreshold = 45.0,
+    this.turnThreshold = 35.0, // Increased from 8.0 to 35.0
     this.requiredFrames = 10,
-    this.phaseDuration = const Duration(milliseconds: 500),
+    this.phaseDuration = const Duration(milliseconds: 250),
     this.errorResetDuration = const Duration(seconds: 2),
     this.maxConsecutiveErrors = 5,
-    this.circleSize = 250.0, // Default value for circleSize
+    this.circleSize = 250.0,
   });
 }

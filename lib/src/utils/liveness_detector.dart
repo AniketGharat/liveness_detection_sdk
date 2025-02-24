@@ -353,15 +353,15 @@ class LivenessDetector {
   // Check if face is looking left correctly
   bool _isValidLeftTurn(double headEulerY) {
     final targetAngle =
-        isFrontCamera ? config.turnThreshold : config.turnThreshold;
+        isFrontCamera ? config.turnThreshold : -config.turnThreshold;
     return (isFrontCamera && headEulerY >= targetAngle) ||
-        (!isFrontCamera && headEulerY <= targetAngle);
+        (!isFrontCamera && headEulerY <= -targetAngle);
   }
 
   // Check if face is looking right correctly
   bool _isValidRightTurn(double headEulerY) {
     final targetAngle =
-        isFrontCamera ? -config.turnThreshold : -config.turnThreshold;
+        isFrontCamera ? -config.turnThreshold : config.turnThreshold;
     return (isFrontCamera && headEulerY <= targetAngle) ||
         (!isFrontCamera && headEulerY >= targetAngle);
   }
