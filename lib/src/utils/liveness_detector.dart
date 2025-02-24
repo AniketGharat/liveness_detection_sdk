@@ -411,12 +411,3 @@ class LivenessDetector {
     }
   }
 }
-
-enum LivenessState {
-  initial,
-  lookingLeft,
-  lookingRight,
-  lookingStraight,
-  complete,
-  multipleFaces,
-}
