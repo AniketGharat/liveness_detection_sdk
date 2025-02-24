@@ -244,35 +244,54 @@ class LivenessDetector {
     _lastStateChange = DateTime.now();
     _stableFrameCount = 0;
 
-    // Update state progress cumulatively based on state progression
+    // Update state progress one step at a time
     switch (newState) {
       case LivenessState.initial:
+        // Initial state only updates its own progress
         _stateProgress[LivenessState.initial] = 1.0;
+        _stateProgress[LivenessState.lookingLeft] = 0.0;
+        _stateProgress[LivenessState.lookingRight] = 0.0;
+        _stateProgress[LivenessState.lookingStraight] = 0.0;
         break;
+
       case LivenessState.lookingLeft:
+        // First quarter complete
+        _stateProgress[LivenessState.initial] = 1.0;
+        _stateProgress[LivenessState.lookingLeft] =
+            0.0; // Will be updated through _processCurrentState
+        _stateProgress[LivenessState.lookingRight] = 0.0;
+        _stateProgress[LivenessState.lookingStraight] = 0.0;
+        break;
+
+      case LivenessState.lookingRight:
+        // Second quarter complete
         _stateProgress[LivenessState.initial] = 1.0;
         _stateProgress[LivenessState.lookingLeft] = 1.0;
+        _stateProgress[LivenessState.lookingRight] =
+            0.0; // Will be updated through _processCurrentState
+        _stateProgress[LivenessState.lookingStraight] = 0.0;
         break;
-      case LivenessState.lookingRight:
+
+      case LivenessState.lookingStraight:
+        // Third quarter complete
         _stateProgress[LivenessState.initial] = 1.0;
         _stateProgress[LivenessState.lookingLeft] = 1.0;
         _stateProgress[LivenessState.lookingRight] = 1.0;
+        _stateProgress[LivenessState.lookingStraight] =
+            0.0; // Will be updated through _processCurrentState
         break;
-      case LivenessState.lookingStraight:
+
+      case LivenessState.complete:
+        // All quarters complete
         _stateProgress[LivenessState.initial] = 1.0;
         _stateProgress[LivenessState.lookingLeft] = 1.0;
         _stateProgress[LivenessState.lookingRight] = 1.0;
         _stateProgress[LivenessState.lookingStraight] = 1.0;
         break;
-      case LivenessState.complete:
-        // Mark all states as complete
-        _stateProgress.forEach((state, _) {
-          _stateProgress[state] = 1.0;
-        });
-        break;
+
       case LivenessState.failed:
       case LivenessState.multipleFaces:
-        // Reset progress for error states
+        // Reset all progress for error states
         _stateProgress.forEach((state, _) {
           _stateProgress[state] = 0.0;
         });
@@ -293,12 +312,33 @@ class LivenessDetector {
       return 0.0;
     }
 
-    // Calculate progress based on completed states
+    // Calculate progress based on current state and completion
     double total = 0.0;
-    if (_stateProgress[LivenessState.initial]! >= 1.0) total += 0.25;
-    if (_stateProgress[LivenessState.lookingLeft]! >= 1.0) total += 0.25;
-    if (_stateProgress[LivenessState.lookingRight]! >= 1.0) total += 0.25;
-    if (_stateProgress[LivenessState.lookingStraight]! >= 1.0) total += 0.25;
+
+    // Add 0.25 for initial state (first quarter)
+    if (_stateProgress[LivenessState.initial]! >= 1.0) {
+      total += 0.25;
+    }
+
+    // Add 0.25 for looking left (second quarter)
+    if (_currentState != LivenessState.initial &&
+        _stateProgress[LivenessState.lookingLeft]! >= 1.0) {
+      total += 0.25;
+    }
+
+    // Add 0.25 for looking right (third quarter)
+    if (_currentState != LivenessState.initial &&
+        _currentState != LivenessState.lookingLeft &&
+        _stateProgress[LivenessState.lookingRight]! >= 1.0) {
+      total += 0.25;
+    }
+
+    // Add 0.25 for looking straight (fourth quarter)
+    if (_currentState == LivenessState.complete &&
+        _stateProgress[LivenessState.lookingStraight]! >= 1.0) {
+      total += 0.25;
+    }
+
     return total;
   }
 
