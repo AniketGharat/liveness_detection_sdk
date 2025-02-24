@@ -32,13 +32,14 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   LivenessDetector? _livenessDetector;
   LivenessState _currentState = LivenessState.initial;
   String _currentAnimationPath = 'assets/animations/face_scan_init.json';
-  String _instruction = "Position your face in the circle and blink 3 times";
+  String _instruction = "Position your face in the circle";
   double _progress = 0.0;
   bool _isInitialized = false;
   List<CameraDescription>? _cameras;
   bool _isFrontCamera = true;
   bool _isProcessing = false;
   bool _isSwitchingCamera = false;
+  ResolutionPreset _currentResolution = ResolutionPreset.high;
 
   @override
   void initState() {
@@ -48,13 +49,11 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   void _initializeAnimationControllers() {
-    // Main face overlay animation
     _faceAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
 
-    // Individual state animations
     for (var state in LivenessState.values) {
       _stateAnimationControllers[state] = AnimationController(
         vsync: this,
@@ -91,53 +90,16 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _isSwitchingCamera = true;
     });
 
-    // Stop current image stream if active
-    if (_cameraController?.value.isStreamingImages ?? false) {
-      await _cameraController?.stopImageStream();
-    }
-
-    // Dispose current resources
-    await _cameraController?.dispose();
-    _livenessDetector?.dispose();
-
-    // Select appropriate camera
-    final CameraDescription selectedCamera = _isFrontCamera
-        ? _cameras!.firstWhere(
-            (camera) => camera.lensDirection == CameraLensDirection.front,
-            orElse: () => _cameras!.first,
-          )
-        : _cameras!.firstWhere(
-            (camera) => camera.lensDirection == CameraLensDirection.back,
-            orElse: () => _cameras!.first,
-          );
-
-    _cameraController = CameraController(
-      selectedCamera,
-      ResolutionPreset.high,
-      enableAudio: false,
-      imageFormatGroup: Platform.isAndroid
-          ? ImageFormatGroup.bgra8888
-          : ImageFormatGroup.bgra8888,
-    );
+    // Stop current camera if active
+    await _stopCurrentCamera();
 
     try {
-      await _cameraController!.initialize();
+      // Select appropriate camera
+      final CameraDescription selectedCamera = _getSelectedCamera();
 
-      // In your LivenessCameraView, make sure you're properly passing the progress:
-      _livenessDetector = LivenessDetector(
-        config: widget.config,
-        onStateChanged: (state, progress, message, instructions) {
-          if (mounted) {
-            _handleStateChanged(
-              state,
-              progress,
-              message,
-              _getAnimationPathForState(state), // Add this helper method
-            );
-          }
-        },
-        isFrontCamera: _isFrontCamera,
-      );
+      // Initialize new camera controller
+      await _initializeCameraController(selectedCamera);
+
       if (!mounted) return;
 
       setState(() {
@@ -149,27 +111,57 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
 
       // Add delay before starting image stream
       await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted && _cameraController != null) {
-        await _cameraController!.startImageStream(_processImage);
-      }
+      await _startCameraStream();
     } catch (e) {
-      _handleError("Failed to initialize camera: $e");
+      _handleError("Failed to setup camera: $e");
     }
   }
 
-  Future<void> _switchCamera() async {
-    if (_cameras == null ||
-        _cameras!.length < 2 ||
-        _isProcessing ||
-        _isSwitchingCamera) {
-      return;
+  Future<void> _stopCurrentCamera() async {
+    if (_cameraController?.value.isStreamingImages ?? false) {
+      await _cameraController?.stopImageStream();
     }
+    await _cameraController?.dispose();
+    _livenessDetector?.dispose();
+  }
 
-    setState(() {
-      _isFrontCamera = !_isFrontCamera;
-    });
+  CameraDescription _getSelectedCamera() {
+    return _isFrontCamera
+        ? _cameras!.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.front,
+            orElse: () => _cameras!.first,
+          )
+        : _cameras!.firstWhere(
+            (camera) => camera.lensDirection == CameraLensDirection.back,
+            orElse: () => _cameras!.first,
+          );
+  }
 
-    await _setupCamera();
+  Future<void> _initializeCameraController(CameraDescription camera) async {
+    _cameraController = CameraController(
+      camera,
+      _currentResolution == ResolutionPreset.high
+          ? ResolutionPreset.high
+          : ResolutionPreset.medium,
+      enableAudio: false,
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.bgra8888
+          : ImageFormatGroup.bgra8888,
+    );
+
+    await _cameraController!.initialize();
+
+    _livenessDetector = LivenessDetector(
+      config: widget.config,
+      onStateChanged: _handleStateChanged,
+      isFrontCamera: _isFrontCamera,
+    );
+  }
+
+  Future<void> _startCameraStream() async {
+    if (mounted && _cameraController != null) {
+      await _cameraController!.startImageStream(_processImage);
+    }
   }
 
   void _resetState() {
@@ -185,10 +177,23 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     for (var controller in _stateAnimationControllers.values) {
       controller.reset();
     }
-
-    // Restart the face animation controller
     _faceAnimationController.reset();
     _faceAnimationController.repeat(reverse: true);
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras == null ||
+        _cameras!.length < 2 ||
+        _isProcessing ||
+        _isSwitchingCamera) {
+      return;
+    }
+
+    setState(() {
+      _isFrontCamera = !_isFrontCamera;
+    });
+
+    await _setupCamera();
   }
 
   void _processImage(CameraImage image) async {
@@ -213,7 +218,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     LivenessState state,
     double progress,
     String message,
-    String animationPath,
+    String instructions,
   ) async {
     if (!mounted || _isSwitchingCamera) return;
 
@@ -228,11 +233,12 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _currentState = state;
       _instruction = message;
       _progress = progress;
-      _currentAnimationPath = animationPath;
+      _currentAnimationPath = _getAnimationPathForState(state);
     });
 
     _stateAnimationControllers[state]?.repeat();
 
+    // Provide haptic feedback for state changes
     if (state != LivenessState.initial &&
         state != LivenessState.multipleFaces) {
       await _vibrateFeedback();
@@ -255,6 +261,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
 
     try {
+      // Stop image stream before capturing
       if (_cameraController!.value.isStreamingImages) {
         await _cameraController!.stopImageStream();
       }
@@ -286,9 +293,9 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       final image = img.decodeImage(bytes);
       if (image == null) throw Exception("Failed to decode image");
 
-      // Only flip if using front camera
+      // Apply transformations based on camera
       final processedImage = _isFrontCamera ? img.flipHorizontal(image) : image;
-      final jpgBytes = img.encodeJpg(processedImage);
+      final jpgBytes = img.encodeJpg(processedImage, quality: 90);
       await File(newPath).writeAsBytes(jpgBytes);
 
       return newPath;
@@ -315,21 +322,21 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     Navigator.pop(context);
   }
 
-  Widget _buildCameraPreview() {
-    if (!_isInitialized || _isSwitchingCamera) {
-      return const Center(
-        child: CircularProgressIndicator(
-          color: Colors.white,
-        ),
-      );
+  String _getAnimationPathForState(LivenessState state) {
+    switch (state) {
+      case LivenessState.initial:
+        return 'assets/animations/face_scan_init.json';
+      case LivenessState.lookingLeft:
+        return 'assets/animations/look_left.json';
+      case LivenessState.lookingRight:
+        return 'assets/animations/look_right.json';
+      case LivenessState.lookingStraight:
+        return 'assets/animations/look_straight.json';
+      case LivenessState.complete:
+        return 'assets/animations/face_success.json';
+      default:
+        return 'assets/animations/face_scan_init.json';
     }
-
-    return Transform.scale(
-      scale: 1.0,
-      child: Center(
-        child: CameraPreview(_cameraController!),
-      ),
-    );
   }
 
   @override
@@ -349,75 +356,68 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
             ),
           ),
           if (_isInitialized && !_isSwitchingCamera) ...[
-            StateAnimation(
-              animationPath: _currentAnimationPath,
-              controller: _stateAnimationControllers[_currentState]!,
-              state: _currentState,
-            ),
-            Positioned(
-              bottom: 50,
-              left: 20,
-              right: 20,
-              child: AnimatedLivenessMessage(
-                message: _instruction,
-                state: _currentState,
-              ),
-            ),
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: _buildProgressIndicators(),
-              ),
-            ),
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
-              left: 20,
-              child: IconButton(
-                icon: const Icon(
-                  Icons.flip_camera_ios,
-                  color: Colors.white,
-                  size: 30,
-                ),
-                onPressed: _switchCamera,
-              ),
-            ),
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 20,
-              right: 20,
-              child: IconButton(
-                icon: const Icon(
-                  Icons.close,
-                  color: Colors.white,
-                  size: 30,
-                ),
-                onPressed: _handleCancel,
-              ),
-            ),
+            _buildStateAnimation(),
+            _buildInstructionMessage(),
+            _buildProgressIndicators(),
+            _buildCameraControls(),
             if (_currentState == LivenessState.initial)
-              Positioned(
-                top: MediaQuery.of(context).padding.bottom + 170,
-                left: 20,
-                right: 20,
-                child: Text(
-                  "Make sure your face is well-lit and clearly visible",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
-                    fontSize: 16,
-                    height: 1.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
+              _buildInitialStateGuide(),
           ],
         ],
       ),
     );
   }
 
-  List<Widget> _buildProgressIndicators() {
+  Widget _buildCameraPreview() {
+    if (!_isInitialized || _isSwitchingCamera) {
+      return const Center(
+        child: CircularProgressIndicator(
+          color: Colors.white,
+        ),
+      );
+    }
+
+    return Transform.scale(
+      scale: 1.0,
+      child: Center(
+        child: CameraPreview(_cameraController!),
+      ),
+    );
+  }
+
+  Widget _buildStateAnimation() {
+    return StateAnimation(
+      animationPath: _currentAnimationPath,
+      controller: _stateAnimationControllers[_currentState]!,
+      state: _currentState,
+    );
+  }
+
+  Widget _buildInstructionMessage() {
+    return Positioned(
+      bottom: 50,
+      left: 20,
+      right: 20,
+      child: AnimatedLivenessMessage(
+        message: _instruction,
+        state: _currentState,
+      ),
+    );
+  }
+
+  Widget _buildProgressIndicators() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 20,
+      left: 0,
+      right: 0,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: _buildProgressSteps(),
+      ),
+    );
+  }
+
+  List<Widget> _buildProgressSteps() {
     final states = [
       LivenessState.initial,
       LivenessState.lookingLeft,
@@ -446,6 +446,54 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }).toList();
   }
 
+  Widget _buildCameraControls() {
+    return Stack(
+      children: [
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 20,
+          left: 20,
+          child: IconButton(
+            icon: const Icon(
+              Icons.flip_camera_ios,
+              color: Colors.white,
+              size: 30,
+            ),
+            onPressed: _switchCamera,
+          ),
+        ),
+        Positioned(
+          top: MediaQuery.of(context).padding.top + 20,
+          right: 20,
+          child: IconButton(
+            icon: const Icon(
+              Icons.close,
+              color: Colors.white,
+              size: 30,
+            ),
+            onPressed: _handleCancel,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInitialStateGuide() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.bottom + 170,
+      left: 20,
+      right: 20,
+      child: Text(
+        "Make sure your face is well-lit and clearly visible",
+        style: TextStyle(
+          color: Colors.white.withOpacity(0.8),
+          fontSize: 16,
+          height: 1.5,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
   double _getStateProgress(LivenessState state) {
     return switch (state) {
       LivenessState.initial => 0.0,
@@ -456,23 +504,6 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       LivenessState.multipleFaces => 0.0,
       LivenessState.failed => 0.0, // Added case for failed state
     };
-  }
-
-  String _getAnimationPathForState(LivenessState state) {
-    switch (state) {
-      case LivenessState.initial:
-        return 'assets/animations/face_scan_init.json';
-      case LivenessState.lookingLeft:
-        return 'assets/animations/look_left.json';
-      case LivenessState.lookingRight:
-        return 'assets/animations/look_right.json';
-      case LivenessState.lookingStraight:
-        return 'assets/animations/look_straight.json';
-      case LivenessState.complete:
-        return 'assets/animations/face_success.json';
-      default:
-        return 'assets/animations/face_scan_init.json';
-    }
   }
 
   @override
