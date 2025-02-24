@@ -226,12 +226,6 @@ class LivenessDetector {
     return headEulerY.abs() < config.straightThreshold;
   }
 
-  // State management
-  void _updateStateProgress(LivenessState state) {
-    _stateProgress[state] =
-        (_stableFrameCount / config.requiredFrames).clamp(0.0, 1.0);
-  }
-
   void _resetStateTracking() {
     _stableFrameCount = 0;
     _lastValidAngle = null;
