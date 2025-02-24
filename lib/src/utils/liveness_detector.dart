@@ -13,6 +13,7 @@ class LivenessDetector {
   // Face detection components
   late final FaceDetector _faceDetector;
   bool _isProcessing = false;
+  bool _isDisposed = false;
 
   // State tracking
   LivenessState _currentState = LivenessState.initial;
@@ -88,7 +89,8 @@ class LivenessDetector {
   }
 
   Future<void> processImage(CameraImage image) async {
-    if (_isProcessing || _currentState == LivenessState.complete) return;
+    if (_isProcessing || _currentState == LivenessState.complete || _isDisposed)
+      return;
     _isProcessing = true;
 
     try {
@@ -310,6 +312,12 @@ class LivenessDetector {
         eulerZ.abs() < config.straightThreshold;
   }
 
+  // Add dispose method
+  Future<void> dispose() async {
+    _isDisposed = true;
+    await _faceDetector.close();
+  }
+
   void _handleNoFace() {
     if (_currentState != LivenessState.initial) {
       _updateState(LivenessState.initial);
@@ -353,6 +361,8 @@ class LivenessDetector {
   }
 
   void _resetProgress() {
+    if (_isDisposed) return;
+
     _stableFrameCount = 0;
     _hasCompletedLeft = false;
     _hasCompletedRight = false;
@@ -370,6 +380,8 @@ class LivenessDetector {
   }
 
   void _updateState(LivenessState state) {
+    if (_isDisposed) return;
+
     _currentState = state;
     _lastStateChange = DateTime.now();
     onStateChanged(
