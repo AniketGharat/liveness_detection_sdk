@@ -334,6 +334,8 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
         return 'assets/animations/look_straight.json';
       case LivenessState.complete:
         return 'assets/animations/face_success.json';
+      case LivenessState.multipleFaces:
+        return 'assets/animations/multiple_faces.json';
       default:
         return 'assets/animations/face_scan_init.json';
     }
