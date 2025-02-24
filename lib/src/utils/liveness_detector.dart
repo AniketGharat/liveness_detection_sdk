@@ -213,13 +213,13 @@ class LivenessDetector {
   bool _isValidLeftTurn(double headEulerY) {
     final threshold =
         isFrontCamera ? config.turnThreshold : -config.turnThreshold;
-    return isFrontCamera ? headEulerY >= threshold : headEulerY >= threshold;
+    return isFrontCamera ? headEulerY >= threshold : headEulerY <= threshold;
   }
 
   bool _isValidRightTurn(double headEulerY) {
     final threshold =
         isFrontCamera ? -config.turnThreshold : config.turnThreshold;
-    return isFrontCamera ? headEulerY <= threshold : headEulerY <= threshold;
+    return isFrontCamera ? headEulerY <= threshold : headEulerY >= threshold;
   }
 
   bool _isFaceStraight(double headEulerY) {
@@ -392,9 +392,9 @@ class LivenessDetector {
       case LivenessState.initial:
         return "Position your face in the frame";
       case LivenessState.lookingLeft:
-        return "Turn your head left";
+        return isFrontCamera ? "Turn your head left" : "Turn your head right";
       case LivenessState.lookingRight:
-        return "Turn your head right";
+        return isFrontCamera ? "Turn your head right" : "Turn your head left";
       case LivenessState.lookingStraight:
         return "Look straight ahead";
       case LivenessState.complete:
@@ -413,9 +413,13 @@ class LivenessDetector {
       case LivenessState.initial:
         return "Center your face in the frame and look straight ahead";
       case LivenessState.lookingLeft:
-        return "Slowly turn your head to the left";
+        return isFrontCamera
+            ? "Slowly turn your head to the left"
+            : "Slowly turn your head to the right";
       case LivenessState.lookingRight:
-        return "Slowly turn your head to the right";
+        return isFrontCamera
+            ? "Slowly turn your head to the right"
+            : "Slowly turn your head to the left";
       case LivenessState.lookingStraight:
         return "Return to looking straight ahead";
       case LivenessState.complete:
