@@ -35,55 +35,39 @@ class FaceOverlayPainter extends CustomPainter {
       ..strokeWidth = 3;
     canvas.drawCircle(center, radius, circlePaint);
 
-    // Draw progress in quarters
-    if (progress > 0) {
-      final progressPaint = Paint()
-        ..color = Colors.green
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4;
+    // Calculate number of completed quarters (each quarter represents 0.25 progress)
+    final completeQuarters = (progress / 0.25).floor();
+    final remainingProgress = progress % 0.25;
+    final remainingAngle = (remainingProgress / 0.25) * (pi / 2);
 
-      final progressAngle = progress * 2 * pi;
+    // Paint complete quarters in green
+    final progressPaint = Paint()
+      ..color = Colors.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
 
+    for (var i = 0; i < completeQuarters; i++) {
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius),
-        -pi / 2, // Start from top
-        progressAngle,
+        -pi / 2 + (i * pi / 2),
+        pi / 2,
         false,
         progressPaint,
       );
-
-      // Debug progress
-      debugPrint('Drawing progress: $progress, Angle: $progressAngle');
-
-      // Calculate number of complete quarters (0.25 each)
-      final completeQuarters = (progress / 0.25).floor();
-      final remainingProgress = progress % 0.25;
-      final remainingAngle = (remainingProgress / 0.25) * (pi / 2);
-
-      // Draw completed quarters
-      for (var i = 0; i < completeQuarters; i++) {
-        canvas.drawArc(
-          Rect.fromCircle(center: center, radius: radius),
-          -pi / 2 + (i * pi / 2),
-          pi / 2,
-          false,
-          progressPaint,
-        );
-      }
-
-      // Draw partial progress in current quarter
-      if (completeQuarters < 4) {
-        canvas.drawArc(
-          Rect.fromCircle(center: center, radius: radius),
-          -pi / 2 + (completeQuarters * pi / 2),
-          remainingAngle,
-          false,
-          progressPaint,
-        );
-      }
     }
 
-    // Draw guidelines
+    // Paint the remaining quarter if there's any
+    if (completeQuarters < 4) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -pi / 2 + (completeQuarters * pi / 2),
+        remainingAngle,
+        false,
+        progressPaint,
+      );
+    }
+
+    // Draw guidelines (cross lines)
     final guidelinePaint = Paint()
       ..color = Colors.white.withOpacity(0.2)
       ..style = PaintingStyle.stroke

@@ -244,6 +244,25 @@ class LivenessDetector {
     _lastStateChange = DateTime.now();
     _stableFrameCount = 0;
 
+    // Update state progress based on state
+    switch (newState) {
+      case LivenessState.initial:
+        _stateProgress[LivenessState.initial] = 1.0; // Mark as completed
+        break;
+      case LivenessState.lookingLeft:
+        _stateProgress[LivenessState.lookingLeft] = 1.0; // Mark as completed
+        break;
+      case LivenessState.lookingRight:
+        _stateProgress[LivenessState.lookingRight] = 1.0; // Mark as completed
+        break;
+      case LivenessState.lookingStraight:
+        _stateProgress[LivenessState.lookingStraight] =
+            1.0; // Mark as completed
+        break;
+      default:
+        break;
+    }
+
     onStateChanged(
       newState,
       calculateTotalProgress(),
