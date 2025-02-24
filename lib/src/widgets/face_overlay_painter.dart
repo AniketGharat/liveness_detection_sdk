@@ -22,25 +22,45 @@ class FaceOverlayPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * (circleSize / 2);
 
+    // Draw base white circle
     final circlePaint = Paint()
       ..color = Colors.white.withOpacity(0.8)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3;
     canvas.drawCircle(center, radius, circlePaint);
 
+    // Draw progress in quarters
     if (progress > 0) {
       final progressPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3;
 
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        -pi / 2,
-        2 * pi * progress,
-        false,
-        progressPaint,
-      );
+      // Calculate which quarter we're in
+      final quarterProgress = (progress * 4).floor();
+      final currentQuarterProgress = (progress * 4) % 1;
+
+      // Draw completed quarters
+      for (var i = 0; i < quarterProgress; i++) {
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius),
+          -pi / 2 + (i * pi / 2),
+          pi / 2,
+          false,
+          progressPaint,
+        );
+      }
+
+      // Draw current quarter progress
+      if (quarterProgress < 4) {
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius),
+          -pi / 2 + (quarterProgress * pi / 2),
+          pi / 2 * currentQuarterProgress,
+          false,
+          progressPaint,
+        );
+      }
     }
   }
 

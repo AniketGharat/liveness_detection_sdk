@@ -32,7 +32,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   LivenessDetector? _livenessDetector;
   LivenessState _currentState = LivenessState.initial;
   String _currentAnimationPath = 'assets/animations/face_scan_init.json';
-  String _instruction = "Position your face in the circle";
+  String _instruction = "Position your face in the circle and blink 3 times";
   double _progress = 0.0;
   bool _isInitialized = false;
   List<CameraDescription>? _cameras;
@@ -417,13 +417,20 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     ];
 
     return states.map((state) {
-      final isCompleted = _getStateProgress(state) <= _progress;
+      final stateProgress = _getStateProgress(state);
+      final isCurrentState = _currentState == state;
+      final isCompleted = stateProgress <= _progress;
+
       return Container(
         width: 40,
         height: 4,
         margin: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
-          color: isCompleted ? Colors.green : Colors.white.withOpacity(0.3),
+          color: isCompleted
+              ? Colors.green
+              : isCurrentState
+                  ? Colors.white
+                  : Colors.white.withOpacity(0.3),
           borderRadius: BorderRadius.circular(2),
         ),
       );

@@ -181,7 +181,7 @@ class LivenessDetector {
 
     final hasRecentBlink = _lastBlinkTime != null &&
         now.difference(_lastBlinkTime!) < _blinkTimeout;
-    final isExcessivelyStatic = _staticFrameCount > _maxStaticFrames;
+    final isExcessivelyStatic = _staticFrameCount > _maxStaticFrames * 2;
 
     if (!hasRecentBlink || isExcessivelyStatic) {
       isLikelyReal = false;
@@ -250,8 +250,8 @@ class LivenessDetector {
     final targetAngle =
         isFrontCamera ? -config.turnThreshold : config.turnThreshold;
 
-    if ((isFrontCamera && headEulerY <= targetAngle) ||
-        (!isFrontCamera && headEulerY >= targetAngle)) {
+    if ((isFrontCamera && headEulerY >= targetAngle) ||
+        (!isFrontCamera && headEulerY <= targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
         _stableFrameCount++;
@@ -272,8 +272,8 @@ class LivenessDetector {
     final targetAngle =
         isFrontCamera ? config.turnThreshold : -config.turnThreshold;
 
-    if ((isFrontCamera && headEulerY >= targetAngle) ||
-        (!isFrontCamera && headEulerY <= targetAngle)) {
+    if ((isFrontCamera && headEulerY <= targetAngle) ||
+        (!isFrontCamera && headEulerY >= targetAngle)) {
       if (_lastValidAngle != null &&
           DateTime.now().difference(_lastValidAngle!) >= config.phaseDuration) {
         _stableFrameCount++;
@@ -337,7 +337,7 @@ class LivenessDetector {
     onStateChanged(
       LivenessState.initial,
       0.0,
-      "Please use a real face for verification",
+      "Please position your face properly",
       _getAnimationForState(LivenessState.initial),
     );
   }
