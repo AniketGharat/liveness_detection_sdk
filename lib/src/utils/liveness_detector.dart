@@ -240,31 +240,35 @@ class LivenessDetector {
   void _updateState(LivenessState newState) {
     if (_currentState == newState) return;
 
-    // Calculate the new progress based on the state.
-    double progress = _calculateProgressForState(newState);
+    _currentState = newState;
+    _lastStateChange = DateTime.now();
+    _stableFrameCount = 0;
+
+    // Update state progress based on state
+    switch (newState) {
+      case LivenessState.initial:
+        _stateProgress[LivenessState.initial] = 1.0; // Mark as completed
+        break;
+      case LivenessState.lookingLeft:
+        _stateProgress[LivenessState.lookingLeft] = 1.0; // Mark as completed
+        break;
+      case LivenessState.lookingRight:
+        _stateProgress[LivenessState.lookingRight] = 1.0; // Mark as completed
+        break;
+      case LivenessState.lookingStraight:
+        _stateProgress[LivenessState.lookingStraight] =
+            1.0; // Mark as completed
+        break;
+      default:
+        break;
+    }
 
     onStateChanged(
       newState,
-      progress, // Pass updated progress value
+      calculateTotalProgress(),
       _getStateMessage(newState),
       _getCurrentStateInstructions(),
     );
-  }
-
-  double _calculateProgressForState(LivenessState state) {
-    // Depending on your LivenessState enumeration, assign progress values
-    switch (state) {
-      case LivenessState.initial:
-        return 0.25;
-      case LivenessState.lookingLeft:
-        return 0.5;
-      case LivenessState.lookingRight:
-        return 0.75;
-      case LivenessState.lookingStraight:
-        return 1.0; // 100% when the process is completed
-      default:
-        return 0.0; // Initial state or unknown
-    }
   }
 
   double calculateTotalProgress() {
