@@ -127,9 +127,14 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       _livenessDetector = LivenessDetector(
         config: widget.config,
         onStateChanged: (state, progress, message, instructions) {
-          setState(() {
-            _progress = progress; // Make sure this is being set
-          });
+          if (mounted) {
+            _handleStateChanged(
+              state,
+              progress,
+              message,
+              _getAnimationPathForState(state), // Add this helper method
+            );
+          }
         },
         isFrontCamera: _isFrontCamera,
       );
@@ -451,6 +456,23 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       LivenessState.multipleFaces => 0.0,
       LivenessState.failed => 0.0, // Added case for failed state
     };
+  }
+
+  String _getAnimationPathForState(LivenessState state) {
+    switch (state) {
+      case LivenessState.initial:
+        return 'assets/animations/face_scan_init.json';
+      case LivenessState.lookingLeft:
+        return 'assets/animations/look_left.json';
+      case LivenessState.lookingRight:
+        return 'assets/animations/look_right.json';
+      case LivenessState.lookingStraight:
+        return 'assets/animations/look_straight.json';
+      case LivenessState.complete:
+        return 'assets/animations/face_success.json';
+      default:
+        return 'assets/animations/face_scan_init.json';
+    }
   }
 
   @override
