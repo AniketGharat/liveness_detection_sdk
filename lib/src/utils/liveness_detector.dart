@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -88,15 +90,26 @@ class LivenessDetector {
     }
     final bytes = allBytes.done().buffer.asUint8List();
 
-    // Corrected rotation handling for both cameras
-    final InputImageRotation rotation = isFrontCamera
-        ? InputImageRotation.rotation270deg
-        : InputImageRotation.rotation90deg;
+    // Get proper rotation based on platform and camera direction
+    final InputImageRotation rotation;
+    if (Platform.isIOS) {
+      // iOS-specific rotation handling
+      rotation = isFrontCamera
+          ? InputImageRotation.rotation90deg
+          : InputImageRotation.rotation270deg;
+    } else {
+      // Android rotation handling (as you had before)
+      rotation = isFrontCamera
+          ? InputImageRotation.rotation270deg
+          : InputImageRotation.rotation90deg;
+    }
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
       rotation: rotation,
-      format: InputImageFormat.bgra8888,
+      format: Platform.isAndroid
+          ? InputImageFormat.bgra8888
+          : InputImageFormat.yuv420,
       bytesPerRow: image.planes[0].bytesPerRow,
     );
 

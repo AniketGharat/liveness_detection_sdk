@@ -146,7 +146,7 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       enableAudio: false,
       imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.bgra8888
-          : ImageFormatGroup.bgra8888,
+          : ImageFormatGroup.yuv420,
     );
 
     await _cameraController!.initialize();
@@ -293,8 +293,20 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
       final image = img.decodeImage(bytes);
       if (image == null) throw Exception("Failed to decode image");
 
-      // Apply transformations based on camera
-      final processedImage = _isFrontCamera ? img.flipHorizontal(image) : image;
+      // Apply different transformations based on platform and camera
+      final processedImage;
+      if (Platform.isIOS) {
+        if (_isFrontCamera) {
+          // iOS front camera may need different transformations
+          processedImage = img.flipHorizontal(image);
+        } else {
+          processedImage = image;
+        }
+      } else {
+        // Android processing (as you had before)
+        processedImage = _isFrontCamera ? img.flipHorizontal(image) : image;
+      }
+
       final jpgBytes = img.encodeJpg(processedImage, quality: 90);
       await File(newPath).writeAsBytes(jpgBytes);
 
