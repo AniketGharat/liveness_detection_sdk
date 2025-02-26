@@ -44,15 +44,21 @@ class LivenessDetector {
     _updateState(LivenessState.initial);
   }
 
-  void _initializeFaceDetector() {
-    final options = FaceDetectorOptions(
-      enableLandmarks: true,
-      enableClassification: true,
-      enableTracking: true,
-      minFaceSize: 0.15,
-      performanceMode: FaceDetectorMode.accurate,
-    );
-    _faceDetector = FaceDetector(options: options);
+  Future<void> _initializeFaceDetector() async {
+    try {
+      final options = FaceDetectorOptions(
+        enableLandmarks: true,
+        enableClassification: true,
+        enableTracking: true,
+        minFaceSize: 0.15,
+        performanceMode: FaceDetectorMode.accurate,
+      );
+      _faceDetector = FaceDetector(options: options);
+      print("Face detector initialized successfully");
+    } catch (e) {
+      print("Error initializing face detector: $e");
+      throw Exception("Failed to initialize face detector: $e");
+    }
   }
 
   // Main processing functions
@@ -84,39 +90,47 @@ class LivenessDetector {
   }
 
   Future<InputImage> _convertCameraImageToInputImage(CameraImage image) async {
-    final WriteBuffer allBytes = WriteBuffer();
-    for (final Plane plane in image.planes) {
-      allBytes.putUint8List(plane.bytes);
+    try {
+      final WriteBuffer allBytes = WriteBuffer();
+      for (final Plane plane in image.planes) {
+        allBytes.putUint8List(plane.bytes);
+      }
+      final bytes = allBytes.done().buffer.asUint8List();
+
+      // Get proper rotation based on platform and camera direction
+      final InputImageRotation rotation;
+      if (Platform.isIOS) {
+        // iOS-specific rotation handling
+        rotation = isFrontCamera
+            ? InputImageRotation.rotation270deg
+            : InputImageRotation.rotation90deg;
+      } else {
+        // Android rotation handling
+        rotation = isFrontCamera
+            ? InputImageRotation.rotation270deg
+            : InputImageRotation.rotation90deg;
+      }
+
+      final metadata = InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: Platform.isAndroid
+            ? InputImageFormat.nv21 // Try changing from bgra8888 to nv21
+            : InputImageFormat.yuv420,
+        bytesPerRow: image.planes[0].bytesPerRow,
+      );
+
+      print(
+          "Created image metadata with rotation: $rotation, format: ${Platform.isAndroid ? InputImageFormat.nv21 : InputImageFormat.yuv420}");
+
+      return InputImage.fromBytes(
+        bytes: bytes,
+        metadata: metadata,
+      );
+    } catch (e) {
+      print("Error converting camera image: $e");
+      throw Exception("Failed to convert camera image: $e");
     }
-    final bytes = allBytes.done().buffer.asUint8List();
-
-    // Get proper rotation based on platform and camera direction
-    final InputImageRotation rotation;
-    if (Platform.isIOS) {
-      // iOS-specific rotation handling
-      rotation = isFrontCamera
-          ? InputImageRotation.rotation90deg
-          : InputImageRotation.rotation270deg;
-    } else {
-      // Android rotation handling (as you had before)
-      rotation = isFrontCamera
-          ? InputImageRotation.rotation270deg
-          : InputImageRotation.rotation90deg;
-    }
-
-    final metadata = InputImageMetadata(
-      size: Size(image.width.toDouble(), image.height.toDouble()),
-      rotation: rotation,
-      format: Platform.isAndroid
-          ? InputImageFormat.bgra8888
-          : InputImageFormat.yuv420,
-      bytesPerRow: image.planes[0].bytesPerRow,
-    );
-
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: metadata,
-    );
   }
 
   // Face processing logic

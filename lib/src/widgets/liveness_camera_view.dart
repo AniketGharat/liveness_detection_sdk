@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
@@ -62,22 +63,32 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
     }
   }
 
+  // In your initializeCamera method
   Future<void> _initializeCamera() async {
-    final status = await Permission.camera.request();
-    if (status != PermissionStatus.granted) {
-      _handleError("Camera permission required");
-      return;
-    }
-
     try {
+      print("Requesting camera permission...");
+      final status = await Permission.camera.request();
+      print("Camera permission status: $status");
+
+      if (status != PermissionStatus.granted) {
+        print("Camera permission not granted: $status");
+        _handleError("Camera permission required");
+        return;
+      }
+
+      print("Getting available cameras...");
       _cameras = await availableCameras();
+      print("Available cameras: ${_cameras?.length}");
+
       if (_cameras == null || _cameras!.isEmpty) {
+        print("No cameras available");
         _handleError("No cameras available");
         return;
       }
 
       await _setupCamera();
     } catch (e) {
+      print("Camera initialization error: $e");
       _handleError("Failed to initialize camera: $e");
     }
   }
@@ -138,24 +149,49 @@ class _LivenessCameraViewState extends State<LivenessCameraView>
   }
 
   Future<void> _initializeCameraController(CameraDescription camera) async {
-    _cameraController = CameraController(
-      camera,
-      _currentResolution == ResolutionPreset.high
-          ? ResolutionPreset.high
-          : ResolutionPreset.medium,
-      enableAudio: false,
-      imageFormatGroup: Platform.isAndroid
-          ? ImageFormatGroup.bgra8888
-          : ImageFormatGroup.yuv420,
-    );
+    print(
+        "Setting up camera controller for ${camera.lensDirection.toString()}");
 
-    await _cameraController!.initialize();
+    // Use lower resolution on iOS
+    final resolution = Platform.isIOS
+        ? ResolutionPreset.medium
+        : (_currentResolution == ResolutionPreset.high
+            ? ResolutionPreset.high
+            : ResolutionPreset.medium);
 
-    _livenessDetector = LivenessDetector(
-      config: widget.config,
-      onStateChanged: _handleStateChanged,
-      isFrontCamera: _isFrontCamera,
-    );
+    print("Using resolution: $resolution");
+
+    try {
+      _cameraController = CameraController(
+        camera,
+        resolution,
+        enableAudio: false,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.nv21 // Try changing from bgra8888 to nv21
+            : ImageFormatGroup.yuv420,
+      );
+
+      print("Initializing camera controller...");
+      await _cameraController!.initialize();
+      print("Camera controller initialized");
+
+      // Lock orientation on iOS
+      if (Platform.isIOS) {
+        print("Locking capture orientation on iOS");
+        await _cameraController!
+            .lockCaptureOrientation(DeviceOrientation.portraitUp);
+      }
+
+      _livenessDetector = LivenessDetector(
+        config: widget.config,
+        onStateChanged: _handleStateChanged,
+        isFrontCamera: _isFrontCamera,
+      );
+      print("Liveness detector created");
+    } catch (e) {
+      print("Error during camera controller initialization: $e");
+      _handleError("Camera initialization failed: $e");
+    }
   }
 
   Future<void> _startCameraStream() async {
